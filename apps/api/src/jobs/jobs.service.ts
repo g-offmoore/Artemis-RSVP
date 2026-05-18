@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { PgBoss } from "pg-boss";
+import { normalizeNodePostgresConnectionString } from "@artemis/db";
 import { AlertService } from "../common/alert.service.js";
 import { MetricsService } from "../metrics/metrics.service.js";
 
@@ -20,7 +21,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.boss = new PgBoss({
-      connectionString: process.env.DATABASE_URL ?? "",
+      connectionString: normalizeNodePostgresConnectionString(process.env.DATABASE_URL ?? ""),
       max: Number.parseInt(process.env.PGBOSS_POOL_MAX ?? "2", 10),
       schema: process.env.PGBOSS_SCHEMA ?? "pgboss",
       migrate: false,

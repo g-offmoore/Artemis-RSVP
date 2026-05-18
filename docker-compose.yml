@@ -115,6 +115,7 @@ services:
       DATABASE_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL is required for migrations}
       PGBOSS_DATABASE_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL is required for pg-boss migrations}
       PGBOSS_SCHEMA: ${PGBOSS_SCHEMA:-pgboss}
+      PGBOSS_MIGRATION_POOL_MAX: 1
     command: ["npm", "--workspace", "@artemis/db", "run", "deploy:migrate"]
     logging: *default_logging
 

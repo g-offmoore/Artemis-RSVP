@@ -18,8 +18,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "pgboss:migrate": "pg-boss migrate",
-    "deploy:migrate": "prisma migrate deploy && pg-boss migrate"
+    "pgboss:migrate": "node scripts/migrate-pgboss.mjs",
+    "deploy:migrate": "prisma migrate deploy && node scripts/migrate-pgboss.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.8.0",

@@ -25,7 +25,7 @@ Current baseline estimate is about `$26/mo+`: `$5` Nanode, `$16` managed Postgre
 - Alert if active DB connections exceed 70% of `DATABASE_PLAN_MAX_CONNECTIONS`.
 - If connection pressure appears before CPU/RAM pressure, enable managed PgBouncer or equivalent pooling before scaling app processes.
 
-When checking the database manually with `psql`, remove Prisma/driver-only query parameters such as `connection_limit` from the URL. Keep `sslmode=require` for managed PostgreSQL.
+The Node `pg` clients used by Prisma's adapter and pg-boss normalize `sslmode=require` to libpq-compatible TLS behavior for managed PostgreSQL certificates when no custom `sslrootcert` is supplied. When checking the database manually with `psql`, remove Prisma/driver-only query parameters such as `connection_limit` from the URL. Keep `sslmode=require` for managed PostgreSQL.
 
 ## Production Environment Contract
 
