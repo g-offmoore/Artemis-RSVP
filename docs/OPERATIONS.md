@@ -19,23 +19,64 @@ Current baseline estimate is about `$26/mo+`: `$5` Nanode, `$16` managed Postgre
 - Keep explicit low Prisma pool limits through `DATABASE_POOL_MAX`; default API pool is 5.
 - `pg-boss` starts with its own small pool through `PGBOSS_POOL_MAX`; default is 2.
 - Migrations run as a one-shot deploy job and not alongside heavy traffic.
+- The migrate job uses `DATABASE_MIGRATION_URL` for both `prisma migrate deploy` and `pg-boss migrate`.
+- The API runtime uses `DATABASE_URL`, which should be the limited `artemis_app` credential.
 - Prisma Studio is local or temporary only.
 - Alert if active DB connections exceed 70% of `DATABASE_PLAN_MAX_CONNECTIONS`.
 - If connection pressure appears before CPU/RAM pressure, enable managed PgBouncer or equivalent pooling before scaling app processes.
 
+When checking the database manually with `psql`, remove Prisma/driver-only query parameters such as `connection_limit` from the URL. Keep `sslmode=require` for managed PostgreSQL.
+
+## Production Environment Contract
+
+Use `.env.production.example` as the canonical production template and store the real file on the host at `/etc/artemis/production.env`. Do not keep production secrets in the repository or paste them into shared chat.
+
+Canonical names:
+
+- `APP_DOMAIN`, not `APP_BASE_URL`.
+- `SESSION_SECRET`, not `NEXTAUTH_SECRET`.
+- `DISCORD_TOKEN`, not `DISCORD_BOT_TOKEN`.
+- `DATABASE_MIGRATION_URL`, not `MIGRATION_DATABASE_URL`.
+- `INTERNAL_API_TOKEN`, not `API_INTERNAL_TOKEN`.
+
+Optional URLs such as `DISCORD_OPS_WEBHOOK_URL` and `FEEDBACK_FORM_URL` may be blank; the API and bot normalize blank strings to unset.
+
 ## Nanode Deployment Sequence
 
-Use `scripts/deploy-nanode.sh` on the host. Do not run blue/green or duplicate full-stack deployments on the Nanode.
+Use `scripts/deploy-nanode.sh` on the host. It defaults to `/opt/artemis` and `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
 
-1. Pull new images.
-2. Run migration one-shot.
-3. Restart API.
-4. Health-check API.
-5. Restart web.
-6. Health-check web.
-7. Restart bot last.
-8. Verify bot gateway connection and command health.
-9. Prune old images after successful deployment.
+1. Validate Compose configuration with the production env file.
+2. Build images on the host.
+3. Run the migration one-shot.
+4. Restart API.
+5. Health-check API `/readyz`.
+6. Restart web.
+7. Health-check web `/api/healthz`.
+8. Restart Caddy.
+9. Restart bot last after API is healthy.
+10. Verify bot gateway connection and command health.
+11. Prune old images after successful deployment.
+
+Equivalent manual commands:
+
+```bash
+cd /opt/artemis
+docker compose --env-file /etc/artemis/production.env config
+docker compose --env-file /etc/artemis/production.env build
+docker compose --env-file /etc/artemis/production.env --profile migrate run --rm migrate
+docker compose --env-file /etc/artemis/production.env up -d api
+docker compose --env-file /etc/artemis/production.env exec -T api node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+docker compose --env-file /etc/artemis/production.env up -d web caddy bot
+docker compose --env-file /etc/artemis/production.env ps
+```
+
+Before deploying from a workstation or CI runner, run the Docker smoke path with placeholder env values:
+
+```bash
+docker compose --env-file .env.production.example config
+docker compose --env-file .env.production.example build
+docker compose --env-file .env.production.example run --rm --no-deps -e ARTEMIS_STARTUP_CHECK=true api npm --workspace @artemis/api run start:check
+```
 
 ## Next.js Runtime Strategy
 

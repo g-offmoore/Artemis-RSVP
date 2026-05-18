@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -18,6 +20,10 @@ jobs:
       - run: npm run prisma:generate
         env:
           DATABASE_URL: postgresql://example:example@localhost:5432/example
+      - run: npm run check:deploy
       - run: npm run typecheck
       - run: npm run test
+      - run: docker compose --env-file .env.production.example config
+      - run: docker compose --env-file .env.production.example build
+      - run: docker compose --env-file .env.production.example run --rm --no-deps -e ARTEMIS_STARTUP_CHECK=true api npm --workspace @artemis/api run start:check
       - run: npm audit --audit-level=high

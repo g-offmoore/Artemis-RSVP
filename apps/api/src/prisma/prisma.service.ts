@@ -14,6 +14,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
+    if (process.env.ARTEMIS_STARTUP_CHECK === "true") {
+      this.logger.log("Skipping PostgreSQL connection for startup check");
+      return;
+    }
+
     await this.client.$connect();
     this.logger.log("Connected to PostgreSQL");
   }

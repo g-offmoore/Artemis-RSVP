@@ -1,5 +1,6 @@
-import { Controller, ForbiddenException, Get, Header, Query } from "@nestjs/common";
+import { Controller, ForbiddenException, Get, Header, Query, ServiceUnavailableException } from "@nestjs/common";
 import { Public } from "../common/public.decorator.js";
+import { JobsService } from "../jobs/jobs.service.js";
 import { MetricsService } from "../metrics/metrics.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -7,7 +8,8 @@ import { PrismaService } from "../prisma/prisma.service.js";
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly metrics: MetricsService
+    private readonly metrics: MetricsService,
+    private readonly jobs: JobsService
   ) {}
 
   @Public()
@@ -20,7 +22,11 @@ export class HealthController {
   @Get("readyz")
   async readyz() {
     await this.prisma.client.$queryRaw`SELECT 1`;
-    return { ok: true, database: "reachable" };
+    if (!this.jobs.isReady()) {
+      throw new ServiceUnavailableException({ ok: false, database: "reachable", jobs: "not_ready" });
+    }
+
+    return { ok: true, database: "reachable", jobs: "ready" };
   }
 
   @Public()

@@ -14,9 +14,17 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
+    if (process.env.ARTEMIS_STARTUP_CHECK === "true") {
+      this.logger.log("Skipping pg-boss start for startup check");
+      return;
+    }
+
     this.boss = new PgBoss({
       connectionString: process.env.DATABASE_URL ?? "",
-      max: Number.parseInt(process.env.PGBOSS_POOL_MAX ?? "2", 10)
+      max: Number.parseInt(process.env.PGBOSS_POOL_MAX ?? "2", 10),
+      schema: process.env.PGBOSS_SCHEMA ?? "pgboss",
+      migrate: false,
+      createSchema: false
     });
 
     this.boss.on("error", (error: Error) => {
@@ -35,5 +43,9 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   get client() {
     if (!this.boss) throw new Error("Job runner has not started");
     return this.boss;
+  }
+
+  isReady() {
+    return Boolean(this.boss);
   }
 }

@@ -8,4 +8,5 @@ coverage
 artemis-backups
 *.dump
 *.sql
+!packages/db/prisma/migrations/**/migration.sql
 *.log

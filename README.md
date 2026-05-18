@@ -20,6 +20,7 @@ The old root `src/`, `rsvphandlers.ts`, and `Artemis/` folders are prototype ref
 ```bash
 npm install
 npm run prisma:generate
+npm run check:deploy
 npm run typecheck
 npm test
 npm run lint
@@ -28,4 +29,6 @@ npm run build
 
 ## Production Notes
 
-Read [docs/OPERATIONS.md](docs/OPERATIONS.md) before deploying. It defines the cost baseline, database connection budget, Nanode deployment order, backup/restore drills, metrics protection, and known v1 tradeoffs.
+Use `.env.production.example` as the canonical production env template and store the real Linode env file at `/etc/artemis/production.env`.
+
+Read [docs/OPERATIONS.md](docs/OPERATIONS.md) before deploying. It defines the env contract, migration command, database connection budget, Nanode deployment order, backup/restore drills, metrics protection, and known v1 tradeoffs.

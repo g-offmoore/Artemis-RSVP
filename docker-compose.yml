@@ -9,14 +9,16 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - api
-      - web
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
     logging: &default_logging
       driver: local
       options:
@@ -33,12 +35,14 @@ services:
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=128
       PORT: 3000
-      DATABASE_URL: ${DATABASE_URL}
-      DATABASE_POOL_MAX: ${API_DATABASE_POOL_MAX:-5}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-5}
       DATABASE_PLAN_MAX_CONNECTIONS: ${DATABASE_PLAN_MAX_CONNECTIONS:-25}
       DATABASE_CONNECTION_ALERT_THRESHOLD: ${DATABASE_CONNECTION_ALERT_THRESHOLD:-0.7}
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
-      METRICS_TOKEN: ${METRICS_TOKEN}
+      PGBOSS_POOL_MAX: ${PGBOSS_POOL_MAX:-2}
+      PGBOSS_SCHEMA: ${PGBOSS_SCHEMA:-pgboss}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      METRICS_TOKEN: ${METRICS_TOKEN:?METRICS_TOKEN is required}
       DISCORD_OPS_WEBHOOK_URL: ${DISCORD_OPS_WEBHOOK_URL:-}
       FEEDBACK_FORM_URL: ${FEEDBACK_FORM_URL:-}
     expose:
@@ -48,6 +52,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 20s
     logging: *default_logging
 
   web:
@@ -62,23 +67,24 @@ services:
       NODE_OPTIONS: --max-old-space-size=192
       PORT: 3000
       API_INTERNAL_URL: http://api:3000
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
-      SESSION_SECRET: ${SESSION_SECRET}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
-      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
-      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI}
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
-      DASHBOARD_ALLOWED_ROLE_IDS: ${DASHBOARD_ALLOWED_ROLE_IDS}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID is required}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET is required}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:?DISCORD_REDIRECT_URI is required}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?DISCORD_GUILD_ID is required}
+      DASHBOARD_ALLOWED_ROLE_IDS: ${DASHBOARD_ALLOWED_ROLE_IDS:?DASHBOARD_ALLOWED_ROLE_IDS is required}
     expose:
       - "3000"
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/auth/login',{redirect:'manual'}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 20s
     logging: *default_logging
 
   bot:
@@ -92,9 +98,9 @@ services:
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=128
       API_URL: http://api:3000
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
-      DISCORD_TOKEN: ${DISCORD_TOKEN}
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?DISCORD_TOKEN is required}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?DISCORD_GUILD_ID is required}
       DISCORD_OPS_WEBHOOK_URL: ${DISCORD_OPS_WEBHOOK_URL:-}
     depends_on:
       api:
@@ -106,8 +112,10 @@ services:
     profiles: ["migrate"]
     restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_MIGRATION_URL:-${DATABASE_URL}}
-    command: ["npm", "--workspace", "@artemis/db", "run", "prisma:migrate:deploy"]
+      DATABASE_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL is required for migrations}
+      PGBOSS_DATABASE_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL is required for pg-boss migrations}
+      PGBOSS_SCHEMA: ${PGBOSS_SCHEMA:-pgboss}
+    command: ["npm", "--workspace", "@artemis/db", "run", "deploy:migrate"]
     logging: *default_logging
 
 volumes:
