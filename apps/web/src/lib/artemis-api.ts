@@ -39,6 +39,16 @@ export type EventSummary = {
   };
 };
 
+export type GuildSettings = {
+  id: string;
+  guildId: string;
+  defaultTimezone: string;
+  defaultEventChannelId?: string;
+  staffRoleIds: string[];
+  adminRoleIds: string[];
+  feedbackFormUrl?: string;
+};
+
 export type EventDetail = EventSummary & {
   description?: string;
   participants: Array<{

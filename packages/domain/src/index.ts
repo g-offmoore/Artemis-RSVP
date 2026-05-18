@@ -7,10 +7,24 @@ const trimmedOptionalString = (maxLength: number) =>
     emptyStringToUndefined,
     z.string().trim().max(maxLength).optional(),
   );
-const optionalUrlString = z.preprocess(
-  emptyStringToUndefined,
-  z.string().trim().url().max(2048).optional(),
-);
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
+const optionalImageUrlString = z.preprocess(emptyStringToUndefined, z
+  .string()
+  .trim()
+  .url()
+  .max(2048)
+  .refine(
+    (url) => url.startsWith("https://"),
+    "Image URL must use https://.",
+  )
+  .refine((url) => {
+    try {
+      return IMAGE_EXTENSIONS.test(new URL(url).pathname);
+    } catch {
+      return false;
+    }
+  }, "Image URL must end in .png, .jpg, .jpeg, .gif, or .webp.")
+  .optional());
 
 const eventDateSchema = z.preprocess(
   (value) => {
@@ -67,7 +81,7 @@ export const eventCreateSchema = z.object({
   channelId: z.string().min(1),
   title: z.string().trim().min(1).max(120),
   description: trimmedOptionalString(2000),
-  imageUrl: optionalUrlString,
+  imageUrl: optionalImageUrlString,
   eventTypeKey: z.string().trim().min(1).default("dnd_session_night"),
   gameSystem: z.string().trim().min(1).default("D&D"),
   startAt: eventDateSchema,
@@ -224,7 +238,27 @@ function formatUtcAsTimeZoneParts(date: Date, timeZone: string) {
 export const eventUpdateSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(2000).nullable().optional(),
-  imageUrl: z.string().trim().url().max(2048).nullable().optional(),
+  imageUrl: z.preprocess(
+    emptyStringToUndefined,
+    z
+      .string()
+      .trim()
+      .url()
+      .max(2048)
+      .refine(
+        (url) => url.startsWith("https://"),
+        "Image URL must use https://.",
+      )
+      .refine((url) => {
+        try {
+          return IMAGE_EXTENSIONS.test(new URL(url).pathname);
+        } catch {
+          return false;
+        }
+      }, "Image URL must end in .png, .jpg, .jpeg, .gif, or .webp.")
+      .nullable()
+      .optional(),
+  ),
   gameSystem: z.string().trim().min(1).optional(),
   startAt: eventDateSchema.optional(),
   endAt: eventDateSchema.optional(),
@@ -470,6 +504,32 @@ function groupParties(participants: AssignmentParticipant[]): Party[] {
     participants: grouped,
   }));
 }
+
+const ianaTimezoneSchema = z
+  .string()
+  .min(1)
+  .refine((tz) => {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Use a valid IANA timezone like America/New_York or America/Chicago.");
+
+export const guildSettingsUpdateSchema = z.object({
+  defaultTimezone: ianaTimezoneSchema.optional(),
+  defaultEventChannelId: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .optional(),
+  feedbackFormUrl: z.preprocess(
+    emptyStringToUndefined,
+    z.string().url().optional(),
+  ),
+  staffRoleIds: z.array(z.string().min(1)).optional(),
+  adminRoleIds: z.array(z.string().min(1)).optional(),
+});
+export type GuildSettingsUpdate = z.infer<typeof guildSettingsUpdateSchema>;
 
 export function temporaryRoleName(
   eventTitle: string,

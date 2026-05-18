@@ -15,6 +15,7 @@ export function EditEventForm({
   defaultEndTime,
   defaultImageUrl,
   defaultDescription,
+  defaultTimezone,
 }: {
   eventId: string;
   defaultTitle: string;
@@ -24,6 +25,7 @@ export function EditEventForm({
   defaultEndTime: string;
   defaultImageUrl?: string;
   defaultDescription?: string;
+  defaultTimezone?: string;
 }) {
   const [state, formAction, pending] = useActionState(
     updateEventAction,
@@ -41,6 +43,9 @@ export function EditEventForm({
 
       <form className="form-grid compact" action={formAction}>
         <input type="hidden" name="eventId" value={eventId} />
+        {defaultTimezone ? (
+          <input type="hidden" name="timezone" value={defaultTimezone} />
+        ) : null}
         <label>
           Event name
           <input
@@ -66,8 +71,8 @@ export function EditEventForm({
           Starts
           <input
             name="startTime"
+            type="time"
             required
-            placeholder="6:00 PM"
             defaultValue={defaultStartTime}
           />
         </label>
@@ -75,8 +80,8 @@ export function EditEventForm({
           Ends
           <input
             name="endTime"
+            type="time"
             required
-            placeholder="10:00 PM"
             defaultValue={defaultEndTime}
           />
         </label>

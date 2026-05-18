@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   ChatInputCommandInteraction,
   Client,
   EmbedBuilder,
@@ -26,7 +27,37 @@ import { loadConfig } from "./config.js";
 import { runDiscordOpsCheck } from "./discord-ops.js";
 
 const config = loadConfig();
-const eventTimeZone = process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
+const DEFAULT_EVENT_TIME_ZONE =
+  process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
+
+// 5-minute in-memory cache so every /event create doesn't hit the API
+const guildSettingsCache = new Map<
+  string,
+  { timezone: string; channelId?: string; fetchedAt: number }
+>();
+const GUILD_SETTINGS_TTL_MS = 5 * 60 * 1000;
+
+async function getGuildTimezone(guildId: string): Promise<string> {
+  const cached = guildSettingsCache.get(guildId);
+  if (cached && Date.now() - cached.fetchedAt < GUILD_SETTINGS_TTL_MS) {
+    return cached.timezone;
+  }
+  try {
+    const settings = (await api.getGuildSettings(guildId)) as {
+      defaultTimezone?: string;
+      defaultEventChannelId?: string;
+    };
+    const entry = {
+      timezone: settings.defaultTimezone ?? DEFAULT_EVENT_TIME_ZONE,
+      channelId: settings.defaultEventChannelId ?? undefined,
+      fetchedAt: Date.now(),
+    };
+    guildSettingsCache.set(guildId, entry);
+    return entry.timezone;
+  } catch {
+    return DEFAULT_EVENT_TIME_ZONE;
+  }
+}
 const logger = pino({
   level: process.env.LOG_LEVEL ?? "info",
   redact: [
@@ -192,6 +223,36 @@ async function registerCommands() {
       subcommand
         .setName("check")
         .setDescription("Run Discord permission and delivery checks"),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("settings")
+        .setDescription("Show current Artemis guild settings"),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("set-event-channel")
+        .setDescription("Set the default channel for event Discord posts")
+        .addChannelOption((option) =>
+          option
+            .setName("channel")
+            .setDescription("Channel to post event embeds in")
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("set-timezone")
+        .setDescription(
+          "Set the guild timezone for event times (e.g. America/Chicago)",
+        )
+        .addStringOption((option) =>
+          option
+            .setName("timezone")
+            .setDescription("IANA timezone, e.g. America/New_York or America/Los_Angeles")
+            .setRequired(true),
+        ),
     );
 
   await client.application?.commands.set(
@@ -203,7 +264,23 @@ async function registerCommands() {
 
 async function handleCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "ops") {
-    await runDiscordOpsCheck(interaction);
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand === "check") {
+      await runDiscordOpsCheck(interaction);
+      return;
+    }
+    if (subcommand === "settings") {
+      await handleOpsSettings(interaction);
+      return;
+    }
+    if (subcommand === "set-event-channel") {
+      await handleOpsSetEventChannel(interaction);
+      return;
+    }
+    if (subcommand === "set-timezone") {
+      await handleOpsSetTimezone(interaction);
+      return;
+    }
     return;
   }
 
@@ -211,18 +288,20 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
 
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "create") {
+    const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+    const timeZone = await getGuildTimezone(guildId);
     let startAt: Date;
     let endAt: Date;
     try {
       startAt = parseEventDateTimeParts(
         interaction.options.getString("date", true),
         interaction.options.getString("start_time", true),
-        eventTimeZone,
+        timeZone,
       );
       endAt = parseEventDateTimeParts(
         interaction.options.getString("date", true),
         interaction.options.getString("end_time", true),
-        eventTimeZone,
+        timeZone,
       );
       if (endAt <= startAt) {
         endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
@@ -242,7 +321,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
     const image = interaction.options.getAttachment("image");
     const payload = {
-      guildId: interaction.guildId ?? config.DISCORD_GUILD_ID,
+      guildId,
       channelId: interaction.channelId,
       title: interaction.options.getString("name", true),
       description: interaction.options.getString("description") ?? undefined,
@@ -791,6 +870,87 @@ function apiValidationMessage(responseBody: string) {
   } catch {
     return undefined;
   }
+}
+
+async function handleOpsSettings(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+  const settings = (await api.getGuildSettings(guildId)) as {
+    defaultTimezone?: string;
+    defaultEventChannelId?: string;
+    staffRoleIds?: string[];
+    adminRoleIds?: string[];
+    feedbackFormUrl?: string;
+  };
+
+  const embed = new EmbedBuilder()
+    .setTitle("Artemis Guild Settings")
+    .addFields(
+      {
+        name: "Timezone",
+        value: settings.defaultTimezone ?? "America/New_York (default)",
+        inline: true,
+      },
+      {
+        name: "Event channel",
+        value: settings.defaultEventChannelId
+          ? `<#${settings.defaultEventChannelId}>`
+          : "Not set",
+        inline: true,
+      },
+      {
+        name: "Staff roles",
+        value:
+          settings.staffRoleIds?.length
+            ? settings.staffRoleIds.map((id) => `<@&${id}>`).join(", ")
+            : "Not configured",
+        inline: false,
+      },
+      {
+        name: "Feedback form",
+        value: settings.feedbackFormUrl ?? "Not set",
+        inline: false,
+      },
+    );
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
+async function handleOpsSetEventChannel(
+  interaction: ChatInputCommandInteraction,
+) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+  const channel = interaction.options.getChannel("channel", true);
+  await api.updateGuildSettings(guildId, {
+    defaultEventChannelId: channel.id,
+  });
+  guildSettingsCache.delete(guildId);
+  await interaction.editReply({
+    content: `Event channel set to <#${channel.id}>. New events will post there by default.`,
+  });
+}
+
+async function handleOpsSetTimezone(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+  const timezone = interaction.options.getString("timezone", true).trim();
+
+  // Validate IANA timezone before sending to API
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+  } catch {
+    await interaction.editReply({
+      content: `"${timezone}" is not a valid timezone. Use an IANA name like \`America/New_York\`, \`America/Chicago\`, or \`America/Los_Angeles\`.`,
+    });
+    return;
+  }
+
+  await api.updateGuildSettings(guildId, { defaultTimezone: timezone });
+  guildSettingsCache.delete(guildId);
+  await interaction.editReply({
+    content: `Timezone set to \`${timezone}\`. New events will use this timezone.`,
+  });
 }
 
 async function sendOpsAlert(

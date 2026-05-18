@@ -8,8 +8,10 @@ const initialState: ActionState = { ok: false, message: "" };
 
 export function EventCreateForm({
   defaultChannelId,
+  defaultTimezone,
 }: {
   defaultChannelId?: string;
+  defaultTimezone?: string;
 }) {
   const [state, formAction, pending] = useActionState(
     createEventAction,
@@ -28,6 +30,9 @@ export function EventCreateForm({
       </div>
 
       <form className="form-grid" action={formAction}>
+        {defaultTimezone ? (
+          <input type="hidden" name="timezone" value={defaultTimezone} />
+        ) : null}
         <label>
           Event name
           <input
@@ -51,11 +56,11 @@ export function EventCreateForm({
         </label>
         <label>
           Starts
-          <input name="startTime" required placeholder="6:00 PM" />
+          <input name="startTime" type="time" required />
         </label>
         <label>
           Ends
-          <input name="endTime" required placeholder="10:00 PM" />
+          <input name="endTime" type="time" required />
         </label>
         <label>
           Discord channel ID

@@ -15,7 +15,8 @@ export type ActionState = {
 };
 
 const emptyState: ActionState = { ok: false, message: "" };
-const eventTimeZone = process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
+const defaultEventTimeZone =
+  process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
 
 export async function createEventAction(
   _state: ActionState = emptyState,
@@ -36,15 +37,17 @@ export async function createEventAction(
     };
 
   try {
+    const timeZone =
+      valueOf(formData, "timezone") || defaultEventTimeZone;
     const startAt = parseEventDateTimeParts(
       valueOf(formData, "date"),
       valueOf(formData, "startTime"),
-      eventTimeZone,
+      timeZone,
     );
     let endAt = parseEventDateTimeParts(
       valueOf(formData, "date"),
       valueOf(formData, "endTime"),
-      eventTimeZone,
+      timeZone,
     );
     if (endAt <= startAt)
       endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
@@ -64,7 +67,7 @@ export async function createEventAction(
       },
     });
     eventId = event.id;
-    await artemisApi(`/api/v1/events/${event.id}/discord-post`, {
+    await artemisApi(`/api/v1/events/${event.id}/publish`, {
       method: "POST",
       body: { actorDiscordId: session.discordUserId },
     });
@@ -92,20 +95,14 @@ export async function updateEventAction(
   const eventId = valueOf(formData, "eventId");
 
   try {
+    const timeZone =
+      valueOf(formData, "timezone") || defaultEventTimeZone;
     const date = valueOf(formData, "date");
     const startAt = date
-      ? parseEventDateTimeParts(
-          date,
-          valueOf(formData, "startTime"),
-          eventTimeZone,
-        )
+      ? parseEventDateTimeParts(date, valueOf(formData, "startTime"), timeZone)
       : undefined;
     let endAt = date
-      ? parseEventDateTimeParts(
-          date,
-          valueOf(formData, "endTime"),
-          eventTimeZone,
-        )
+      ? parseEventDateTimeParts(date, valueOf(formData, "endTime"), timeZone)
       : undefined;
     if (startAt && endAt && endAt <= startAt)
       endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
@@ -164,7 +161,7 @@ export async function publishDiscordPostAction(
 
   try {
     const result = await artemisApi<{ channelId: string; messageId: string }>(
-      `/api/v1/events/${eventId}/discord-post`,
+      `/api/v1/events/${eventId}/publish`,
       {
         method: "POST",
         body: { actorDiscordId: session.discordUserId },

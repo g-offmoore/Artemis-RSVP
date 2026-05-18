@@ -15,6 +15,18 @@ compose config >/dev/null
 echo "2. Building images"
 compose build
 
+echo "2a. DB identity check"
+# Extract host and database name from DATABASE_URL to confirm the right target.
+# Format: postgresql://user:pass@host:port/dbname?params
+_db_url=$(grep -m1 '^DATABASE_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+if [[ -n "$_db_url" ]]; then
+  _db_host=$(echo "$_db_url" | sed 's|.*@||' | cut -d/ -f1)
+  _db_name=$(echo "$_db_url" | sed 's|.*@[^/]*/||' | cut -d? -f1)
+  echo "  Target: ${_db_name} on ${_db_host}"
+else
+  echo "  WARNING: Could not read DATABASE_URL from $ENV_FILE"
+fi
+
 echo "3. Running migration one-shot"
 compose --profile migrate run --rm migrate
 
@@ -32,6 +44,12 @@ for i in {1..20}; do
     exit 1
   fi
 done
+
+echo "5a. Post-migration database confirmation"
+_readyz=$(compose exec -T api node -e \
+  "fetch('http://127.0.0.1:3000/readyz').then(r=>r.json()).then(d=>process.stdout.write(JSON.stringify(d))).catch(()=>process.stdout.write('unavailable'))" \
+  2>/dev/null || echo "unavailable")
+echo "  readyz: ${_readyz}"
 
 echo "6. Restarting web"
 compose up -d --no-deps web

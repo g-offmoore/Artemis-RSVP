@@ -69,6 +69,19 @@ export class ArtemisApi {
     });
   }
 
+  async getGuildSettings(guildId: string) {
+    return this.request(
+      `/api/v1/guild-settings?guildId=${encodeURIComponent(guildId)}`,
+    );
+  }
+
+  async updateGuildSettings(guildId: string, patch: Record<string, unknown>) {
+    return this.request(
+      `/api/v1/guild-settings/${encodeURIComponent(guildId)}`,
+      { method: "PATCH", body: patch },
+    );
+  }
+
   private async request(
     path: string,
     options: { method?: string; body?: unknown } = {},

@@ -79,6 +79,91 @@ docker compose --env-file .env.production.example build
 docker compose --env-file .env.production.example run --rm --no-deps -e ARTEMIS_STARTUP_CHECK=true api npm --workspace @artemis/api run start:check
 ```
 
+## Operator Event Workflow
+
+### First-Time Guild Setup
+
+Before staff create events, configure guild defaults with the `/ops` Discord commands:
+
+```text
+/ops set-event-channel  channel:#event-announcements
+/ops set-timezone       timezone:America/New_York
+```
+
+These settings are stored per guild in the `GuildSettings` table. The dashboard reads them automatically — no env var changes required after initial setup. Run `/ops settings` at any time to see the current values.
+
+Supported IANA timezone values for US stores:
+
+| Store location | Timezone string |
+|----------------|----------------|
+| Eastern        | America/New_York |
+| Central        | America/Chicago |
+| Mountain       | America/Denver |
+| Pacific        | America/Los_Angeles |
+| Hawaii         | Pacific/Honolulu |
+
+### Creating an Event (Dashboard)
+
+1. Open the dashboard at your configured `APP_DOMAIN`.
+2. Authenticate with Discord OAuth.
+3. Fill in the Create Event form: event name, game, date (date picker), start time, end time, optional image URL, optional description.
+4. The Discord channel defaults to the value set by `/ops set-event-channel` (or the `DISCORD_EVENT_CHANNEL_ID` env var as a fallback).
+5. Click **Create event**. The API creates the DB record and immediately publishes a Discord embed to the configured channel.
+6. You are redirected to the event detail page. The header shows **Discord post →** linking directly to the message.
+
+### Creating an Event (Discord slash command)
+
+```text
+/event create  name:D&D Thursday Night  date:6/18/2026  start_time:6:00 PM  end_time:10:00 PM
+```
+
+Optional parameters:
+- `description` — shown in the Discord embed
+- `image` — attach an event poster (Discord CDN URL is stored)
+- `game` — D&D (default), Daggerheart, or Board Game
+
+Accepted date formats: `2026-06-18` or `6/18/2026`.  
+Accepted time formats: `18:00`, `6:00 PM`, `6PM`, `1800`.
+
+The command uses the guild timezone from `/ops set-timezone` (falls back to `ARTEMIS_EVENT_TIME_ZONE` env var, then `America/New_York`).
+
+### Editing an Event
+
+Open the event detail page and expand **Edit Event**. Changes are saved to the database and the Discord embed is updated automatically if the event has been published.
+
+### Cancelling an Event
+
+Click **Cancel event** on the event detail page. The status is set to CANCELLED and the Discord embed is updated to reflect the cancelled state. The DB record is preserved.
+
+### Publishing and Re-publishing
+
+If the Discord post was not published automatically, or if the original message was deleted, use the **Publish Discord post** / **Refresh Discord post** button on the event detail page or run:
+
+```text
+POST /api/v1/events/:id/publish
+```
+
+The endpoint edits the existing message if `messageId` is known, or creates a new one if the message is missing or deleted, and updates `messageId` on the event record.
+
+### Image URL Support
+
+Events support an optional image URL. The image appears in the Discord embed and in the dashboard event detail.
+
+Requirements:
+- Must be an `https://` URL.
+- URL pathname must end in `.png`, `.jpg`, `.jpeg`, `.gif`, or `.webp` (case-insensitive).
+- Discord CDN attachment URLs with query parameters (`?ex=...&is=...`) are accepted.
+
+Binary upload to Object Storage is **not yet implemented**. To include an event poster, upload the image to a CDN or Discord channel and paste the URL. This is explicitly tracked as a future improvement.
+
+### Date/Time Validation
+
+Invalid or ambiguous dates return a user-friendly error before the API is called. Common cases:
+
+- Past dates are rejected.
+- End times before start times are auto-advanced by 24 hours (midnight crossover allowed).
+- Times must be recognizable: `18:00`, `6:00 PM`, `6PM`, `1800`. Bare integers like `1700` without a colon or AM/PM are rejected with a clear example message.
+
 ## Next.js Runtime Strategy
 
 - Build Next.js in CI only.
@@ -168,3 +253,5 @@ Accepted v1 tradeoffs:
 - Object Storage backups are required because provider backups alone are not enough.
 - Upgrade to Linode 2 GB is expected if dashboard usage or event volume grows.
 - Meetup integration is intentionally out of scope.
+- Object Storage binary image upload is intentionally out of scope for v1. Use image URLs (https:// with a supported image extension).
+- Discord slash commands require re-registration after any change to the `/ops` command definition. This happens automatically on bot restart.

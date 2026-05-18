@@ -1,13 +1,20 @@
 import Link from "next/link";
 import { CalendarDays, UsersRound } from "lucide-react";
-import { artemisApi, EventSummary } from "../src/lib/artemis-api";
+import { artemisApi, EventSummary, GuildSettings } from "../src/lib/artemis-api";
 import { EventCreateForm } from "./event-create-form";
 
 export default async function DashboardPage() {
   const guildId = process.env.DISCORD_GUILD_ID;
-  const events = guildId
-    ? await artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`)
-    : [];
+  const [events, settings] = await Promise.all([
+    guildId
+      ? artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`)
+      : Promise.resolve([] as EventSummary[]),
+    guildId
+      ? artemisApi<GuildSettings>(
+          `/api/v1/guild-settings?guildId=${guildId}`,
+        ).catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
   const totalParticipants = events.reduce(
     (sum, event) => sum + (event._count?.participants ?? 0),
@@ -47,7 +54,15 @@ export default async function DashboardPage() {
       </section>
 
       <EventCreateForm
-        defaultChannelId={process.env.DISCORD_EVENT_CHANNEL_ID}
+        defaultChannelId={
+          settings?.defaultEventChannelId ??
+          process.env.DISCORD_EVENT_CHANNEL_ID
+        }
+        defaultTimezone={
+          settings?.defaultTimezone ??
+          process.env.ARTEMIS_EVENT_TIME_ZONE ??
+          "America/New_York"
+        }
       />
 
       <h2>Upcoming Events</h2>

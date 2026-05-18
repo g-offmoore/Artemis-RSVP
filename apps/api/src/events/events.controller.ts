@@ -54,8 +54,20 @@ export class EventsController {
   }
 
   @Delete(":id")
-  cancel(@Param("id") id: string, @Body() body: { actorDiscordId?: string }) {
-    return this.events.cancel(id, body.actorDiscordId ?? "system");
+  async cancel(
+    @Param("id") id: string,
+    @Body() body: { actorDiscordId?: string },
+  ) {
+    const actorDiscordId = body.actorDiscordId ?? "system";
+    const event = await this.events.cancel(id, actorDiscordId);
+    if (event.messageId) {
+      try {
+        await this.discordPosts.publishEventPost(id, actorDiscordId);
+      } catch {
+        // Discord sync is non-fatal; failure is recorded in the audit log
+      }
+    }
+    return event;
   }
 
   @Post(":id/rsvps")
@@ -91,6 +103,17 @@ export class EventsController {
     @Body() body: { actorDiscordId?: string } = {},
   ) {
     return this.events.runAssignments(id, body.actorDiscordId ?? "system");
+  }
+
+  @Post(":id/publish")
+  publishEvent(
+    @Param("id") id: string,
+    @Body() body: { actorDiscordId?: string } = {},
+  ) {
+    return this.discordPosts.publishEventPost(
+      id,
+      body.actorDiscordId ?? "system",
+    );
   }
 
   @Post(":id/discord-post")
