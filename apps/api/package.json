@@ -19,6 +19,8 @@
     "@nestjs/common": "11.1.21",
     "@nestjs/core": "11.1.21",
     "@nestjs/platform-fastify": "11.1.21",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
     "pg-boss": "12.18.2",
     "pino": "10.3.1",
     "prom-client": "15.1.3",
