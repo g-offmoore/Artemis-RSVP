@@ -1,0 +1,22 @@
+{
+  "name": "@artemis/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "next dev",
+    "start": "node .next/standalone/apps/web/server.js"
+  },
+  "dependencies": {
+    "lucide-react": "1.16.0",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3"
+  }
+}

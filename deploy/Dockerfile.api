@@ -1,0 +1,22 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json apps/api/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/domain/package.json packages/domain/package.json
+RUN npm install
+COPY . .
+RUN npm run prisma:generate
+RUN npm run build --workspace @artemis/domain
+RUN npm run build --workspace @artemis/db
+RUN npm run build --workspace @artemis/api
+
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json /app/package-lock.json* ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/api ./apps/api
+COPY --from=build /app/packages/db ./packages/db
+COPY --from=build /app/packages/domain ./packages/domain
+CMD ["node", "apps/api/dist/main.js"]

@@ -1,0 +1,115 @@
+name: artemis
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    mem_limit: 96m
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+    logging: &default_logging
+      driver: local
+      options:
+        max-size: "10m"
+
+  api:
+    image: ${ARTEMIS_IMAGE_PREFIX:-artemis}/api:${ARTEMIS_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=128
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_POOL_MAX: ${API_DATABASE_POOL_MAX:-5}
+      DATABASE_PLAN_MAX_CONNECTIONS: ${DATABASE_PLAN_MAX_CONNECTIONS:-25}
+      DATABASE_CONNECTION_ALERT_THRESHOLD: ${DATABASE_CONNECTION_ALERT_THRESHOLD:-0.7}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      METRICS_TOKEN: ${METRICS_TOKEN}
+      DISCORD_OPS_WEBHOOK_URL: ${DISCORD_OPS_WEBHOOK_URL:-}
+      FEEDBACK_FORM_URL: ${FEEDBACK_FORM_URL:-}
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default_logging
+
+  web:
+    image: ${ARTEMIS_IMAGE_PREFIX:-artemis}/web:${ARTEMIS_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=192
+      PORT: 3000
+      API_INTERNAL_URL: http://api:3000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      SESSION_SECRET: ${SESSION_SECRET}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DASHBOARD_ALLOWED_ROLE_IDS: ${DASHBOARD_ALLOWED_ROLE_IDS}
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/auth/login',{redirect:'manual'}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default_logging
+
+  bot:
+    image: ${ARTEMIS_IMAGE_PREFIX:-artemis}/bot:${ARTEMIS_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.bot
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=128
+      API_URL: http://api:3000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DISCORD_OPS_WEBHOOK_URL: ${DISCORD_OPS_WEBHOOK_URL:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *default_logging
+
+  migrate:
+    image: ${ARTEMIS_IMAGE_PREFIX:-artemis}/api:${ARTEMIS_IMAGE_TAG:-latest}
+    profiles: ["migrate"]
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_MIGRATION_URL:-${DATABASE_URL}}
+    command: ["npm", "--workspace", "@artemis/db", "run", "prisma:migrate:deploy"]
+    logging: *default_logging
+
+volumes:
+  caddy_data:
+  caddy_config:

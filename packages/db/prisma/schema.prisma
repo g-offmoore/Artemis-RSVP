@@ -1,0 +1,423 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EventStatus {
+  DRAFT
+  SCHEDULED
+  SIGNUP_OPEN
+  SIGNUP_CLOSED
+  LOCKED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum PlayerCategory {
+  NORMAL
+  HEROIC
+  MIXED
+}
+
+enum ParticipantType {
+  PRIMARY
+  GUEST
+  WALK_IN
+}
+
+enum RSVPStatus {
+  GOING
+  CANCELLED
+  WAITLISTED
+  REMOVED
+}
+
+enum TableStatus {
+  OPEN
+  FULL
+  LOCKED
+  CANCELLED
+  COMPLETED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  WAITLISTED
+  UNASSIGNED
+  REMOVED
+  MOVED
+}
+
+enum AttendanceStatus {
+  ATTENDED
+  NO_SHOW
+  WALK_IN
+  EXCUSED
+  UNKNOWN
+}
+
+enum FeedbackStatus {
+  PENDING
+  SENT
+  OPENED
+  SUBMITTED
+  EXPIRED
+  SKIPPED
+}
+
+enum EventRoleType {
+  PLAYER
+  AMBASSADOR
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model GuildSettings {
+  id                         String   @id @default(cuid())
+  guildId                    String   @unique
+  defaultTimezone            String   @default("America/New_York")
+  staffRoleIds               String[] @default([])
+  adminRoleIds               String[] @default([])
+  ambassadorRoleIds          String[] @default([])
+  normalRoleIds              String[] @default([])
+  heroicRoleIds              String[] @default([])
+  defaultEventChannelId      String?
+  feedbackFormUrl            String?
+  temporaryRoleCleanupDays   Int      @default(14)
+  attendanceReminderHours    Int[]    @default([24, 48])
+  autoCloseAfterHours        Int      @default(72)
+  databaseConnectionLimit    Int      @default(25)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model EventType {
+  id                             String        @id @default(cuid())
+  key                            String        @unique
+  name                           String
+  requiresRsvp                   Boolean       @default(true)
+  allowsGuests                   Boolean       @default(true)
+  maxGuestsPerRsvp               Int           @default(3)
+  requiresAmbassadors            Boolean       @default(true)
+  requiresTableAssignment        Boolean       @default(true)
+  usesPlayerCategories           Boolean       @default(true)
+  createsTemporaryRoles          Boolean       @default(true)
+  requiresAttendanceConfirmation Boolean       @default(true)
+  sendsFeedbackPrompts           Boolean       @default(true)
+  usesWaitlist                   Boolean       @default(true)
+  allowsNameOnlyWalkIns          Boolean       @default(true)
+  defaultGameSystem              String        @default("D&D")
+  events                         Event[]
+  series                         EventSeries[]
+  createdAt                      DateTime      @default(now())
+  updatedAt                      DateTime      @updatedAt
+}
+
+model EventSeries {
+  id                    String    @id @default(cuid())
+  guildId               String
+  eventTypeId           String
+  eventType             EventType @relation(fields: [eventTypeId], references: [id])
+  name                  String
+  defaultChannelId      String
+  recurrenceRule        String
+  signupOpenHoursBefore Int       @default(168)
+  signupCloseHoursBefore Int      @default(1)
+  defaultRoleCleanupDays Int      @default(14)
+  events                Event[]
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([guildId, eventTypeId])
+}
+
+model Event {
+  id                    String              @id @default(cuid())
+  guildId               String
+  eventTypeId           String
+  eventType             EventType           @relation(fields: [eventTypeId], references: [id])
+  seriesId              String?
+  series                EventSeries?        @relation(fields: [seriesId], references: [id])
+  title                 String
+  description           String?
+  gameSystem            String
+  status                EventStatus         @default(SCHEDULED)
+  channelId             String
+  messageId             String?
+  startAt               DateTime
+  endAt                 DateTime
+  signupOpensAt         DateTime?
+  signupClosesAt        DateTime?
+  roleCleanupAt         DateTime?
+  feedbackWindowHours   Int                 @default(72)
+  assignmentNotifiedAt  DateTime?
+  lockedAt              DateTime?
+  createdByDiscordId    String
+  tables                EventTable[]
+  rsvps                 RSVP[]
+  participants          EventParticipant[]
+  assignments           Assignment[]
+  attendanceRecords     AttendanceRecord[]
+  feedbackRequests      FeedbackRequest[]
+  roles                 EventRole[]
+  auditLogs             AuditLog[]
+  notifications         NotificationLog[]
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([guildId, startAt])
+  @@index([status, startAt])
+}
+
+model AmbassadorProfile {
+  id                  String       @id @default(cuid())
+  guildId             String
+  discordUserId       String
+  displayName         String
+  supportedEventKeys  String[]     @default(["dnd_session_night"])
+  supportedGameSystems String[]    @default(["D&D"])
+  defaultSoftCap      Int          @default(6)
+  defaultHardCap      Int          @default(7)
+  defaultTableType    PlayerCategory @default(MIXED)
+  tags                String[]     @default([])
+  active              Boolean      @default(true)
+  notes               String?
+  tables              EventTable[]
+  feedbackRequests    FeedbackRequest[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@unique([guildId, discordUserId])
+  @@index([guildId, active])
+}
+
+model PlayerProfile {
+  id                    String             @id @default(cuid())
+  guildId               String
+  discordUserId         String
+  displayName           String
+  preferredName         String?
+  characterName         String?
+  defaultCategory       PlayerCategory     @default(NORMAL)
+  roleDetectedCategory  PlayerCategory?
+  manualOverrideCategory PlayerCategory?
+  staffNotes            String?
+  rsvps                 RSVP[]
+  participants          EventParticipant[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@unique([guildId, discordUserId])
+  @@index([guildId, displayName])
+}
+
+model EventTable {
+  id                  String             @id @default(cuid())
+  eventId             String
+  event               Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ambassadorProfileId String?
+  ambassadorProfile   AmbassadorProfile? @relation(fields: [ambassadorProfileId], references: [id])
+  title               String
+  tableType           PlayerCategory     @default(MIXED)
+  softCap             Int                @default(6)
+  hardCap             Int                @default(7)
+  description         String?
+  tags                String[]           @default([])
+  status              TableStatus        @default(OPEN)
+  locked              Boolean            @default(false)
+  assignments         Assignment[]
+  attendanceRecords   AttendanceRecord[]
+  feedbackRequests    FeedbackRequest[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([eventId, status])
+}
+
+model RSVP {
+  id                    String             @id @default(cuid())
+  eventId               String
+  event                 Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  primaryDiscordUserId  String
+  playerProfileId       String?
+  playerProfile         PlayerProfile?     @relation(fields: [playerProfileId], references: [id])
+  selectedCategory      PlayerCategory     @default(NORMAL)
+  status                RSVPStatus         @default(GOING)
+  partyKey              String
+  source                String             @default("discord")
+  participants          EventParticipant[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@unique([eventId, primaryDiscordUserId])
+  @@index([eventId, status])
+}
+
+model EventParticipant {
+  id                       String              @id @default(cuid())
+  eventId                  String
+  event                    Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  rsvpId                   String?
+  rsvp                     RSVP?               @relation(fields: [rsvpId], references: [id], onDelete: Cascade)
+  playerProfileId          String?
+  playerProfile            PlayerProfile?      @relation(fields: [playerProfileId], references: [id])
+  participantType          ParticipantType
+  discordUserId            String?
+  enteredName              String?
+  displayName              String
+  preferredName            String?
+  characterName            String?
+  playerCategory           PlayerCategory      @default(NORMAL)
+  partyKey                 String
+  partyOwnerParticipantId  String?
+  partyOwner               EventParticipant?   @relation("PartyOwner", fields: [partyOwnerParticipantId], references: [id])
+  partyMembers             EventParticipant[]  @relation("PartyOwner")
+  feedbackEligible         Boolean             @default(true)
+  messageEligible          Boolean             @default(true)
+  roleEligible             Boolean             @default(true)
+  attendanceEligible       Boolean             @default(true)
+  assignmentEligible       Boolean             @default(true)
+  confirmationStatus       AttendanceStatus    @default(UNKNOWN)
+  createdByDiscordId       String?
+  assignments              Assignment[]
+  attendanceRecords        AttendanceRecord[]
+  feedbackRequests         FeedbackRequest[]
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+
+  @@index([eventId, participantType])
+  @@index([eventId, partyKey])
+  @@index([discordUserId])
+}
+
+model Assignment {
+  id                  String            @id @default(cuid())
+  eventId             String
+  event               Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventParticipantId  String
+  eventParticipant    EventParticipant  @relation(fields: [eventParticipantId], references: [id], onDelete: Cascade)
+  eventTableId        String?
+  eventTable          EventTable?       @relation(fields: [eventTableId], references: [id])
+  status              AssignmentStatus
+  locked              Boolean           @default(false)
+  reason              String
+  assignedBy          String            @default("system")
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@index([eventId, status])
+  @@index([eventTableId, status])
+}
+
+model AttendanceRecord {
+  id                  String            @id @default(cuid())
+  eventId             String
+  event               Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventTableId        String?
+  eventTable          EventTable?       @relation(fields: [eventTableId], references: [id])
+  eventParticipantId  String
+  eventParticipant    EventParticipant  @relation(fields: [eventParticipantId], references: [id], onDelete: Cascade)
+  rsvpId              String?
+  status              AttendanceStatus
+  confirmedByDiscordId String
+  confirmedAt         DateTime          @default(now())
+  source              String            @default("discord")
+  notes               String?
+
+  @@unique([eventId, eventParticipantId])
+  @@index([eventId, status])
+}
+
+model FeedbackRequest {
+  id                   String             @id @default(cuid())
+  eventId              String
+  event                Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventTableId         String?
+  eventTable           EventTable?        @relation(fields: [eventTableId], references: [id])
+  eventParticipantId   String
+  eventParticipant     EventParticipant   @relation(fields: [eventParticipantId], references: [id], onDelete: Cascade)
+  ambassadorProfileId  String?
+  ambassadorProfile    AmbassadorProfile? @relation(fields: [ambassadorProfileId], references: [id])
+  attendanceRecordId   String?
+  status               FeedbackStatus     @default(PENDING)
+  feedbackUrl          String?
+  sentAt               DateTime?
+  submittedAt          DateTime?
+  expiresAt            DateTime?
+
+  @@index([eventId, status])
+}
+
+model EventRole {
+  id            String        @id @default(cuid())
+  eventId       String
+  event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  discordRoleId String
+  roleType      EventRoleType
+  name          String
+  createdAt     DateTime      @default(now())
+  expiresAt     DateTime
+  deletedAt     DateTime?
+
+  @@unique([eventId, roleType])
+  @@unique([discordRoleId])
+}
+
+model NotificationLog {
+  id              String             @id @default(cuid())
+  eventId         String?
+  event           Event?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  recipientUserId String?
+  channelId       String?
+  type            String
+  status          NotificationStatus @default(PENDING)
+  attempts        Int                @default(0)
+  lastError       String?
+  sentAt          DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([eventId, status])
+  @@index([status, createdAt])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  guildId        String
+  eventId        String?
+  event          Event?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  actorDiscordId String
+  action         String
+  beforeValue    Json?
+  afterValue     Json?
+  createdAt      DateTime @default(now())
+
+  @@index([guildId, createdAt])
+  @@index([eventId, createdAt])
+}
+
+model PlayerPreference {
+  id                   String   @id @default(cuid())
+  guildId              String
+  playerDiscordUserId  String
+  preferredDiscordUserIds String[] @default([])
+  avoidDiscordUserIds  String[] @default([])
+  tableStyleTags       String[] @default([])
+  staffOnlyNotes       String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([guildId, playerDiscordUserId])
+}

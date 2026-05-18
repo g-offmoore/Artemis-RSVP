@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+packages/db/src/generated/
+artemis-backups/
+*.dump
+*.sql
+*.log

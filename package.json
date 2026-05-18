@@ -1,0 +1,45 @@
+{
+  "name": "artemis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord-native event operations assistant for community game stores.",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run build --workspace @artemis/domain && npm run build --workspace @artemis/db && npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prisma:generate": "npm --workspace @artemis/db run prisma:generate",
+    "prisma:migrate:deploy": "npm --workspace @artemis/db run prisma:migrate:deploy",
+    "prisma:studio": "npm --workspace @artemis/db run prisma:studio",
+    "dev:api": "npm --workspace @artemis/api run dev",
+    "dev:bot": "npm --workspace @artemis/bot run dev",
+    "dev:web": "npm --workspace @artemis/web run dev"
+  },
+  "overrides": {
+    "@hono/node-server": "1.19.13",
+    "postcss": "8.5.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "24.12.4",
+    "@typescript-eslint/eslint-plugin": "8.59.3",
+    "@typescript-eslint/parser": "8.59.3",
+    "eslint": "10.3.0",
+    "prettier": "3.8.3",
+    "tsx": "4.22.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.59.3",
+    "vitest": "4.1.6"
+  }
+}
