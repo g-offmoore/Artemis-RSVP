@@ -28,6 +28,8 @@ export type EventSummary = {
   title: string;
   status: string;
   gameSystem: string;
+  channelId: string;
+  messageId?: string;
   startAt: string;
   endAt: string;
   imageUrl?: string;

@@ -64,12 +64,70 @@ export async function createEventAction(
       },
     });
     eventId = event.id;
+    await artemisApi(`/api/v1/events/${event.id}/discord-post`, {
+      method: "POST",
+      body: { actorDiscordId: session.discordUserId },
+    });
   } catch (error) {
+    if (eventId) {
+      revalidatePath("/");
+      revalidatePath(`/events/${eventId}`);
+      return {
+        ok: false,
+        message: `Event created (${eventId}), but Discord posting failed: ${actionErrorMessage(error)}`,
+      };
+    }
     return { ok: false, message: actionErrorMessage(error) };
   }
 
   revalidatePath("/");
   redirect(`/events/${eventId}`);
+}
+
+export async function updateEventAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+
+  try {
+    const date = valueOf(formData, "date");
+    const startAt = date
+      ? parseEventDateTimeParts(
+          date,
+          valueOf(formData, "startTime"),
+          eventTimeZone,
+        )
+      : undefined;
+    let endAt = date
+      ? parseEventDateTimeParts(
+          date,
+          valueOf(formData, "endTime"),
+          eventTimeZone,
+        )
+      : undefined;
+    if (startAt && endAt && endAt <= startAt)
+      endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+
+    await artemisApi(`/api/v1/events/${eventId}`, {
+      method: "PATCH",
+      body: {
+        title: optionalValueOf(formData, "title"),
+        description: valueOf(formData, "description") || null,
+        imageUrl: valueOf(formData, "imageUrl") || null,
+        gameSystem: optionalValueOf(formData, "gameSystem"),
+        startAt: startAt?.toISOString(),
+        endAt: endAt?.toISOString(),
+        actorDiscordId: session.discordUserId,
+      },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/events/${eventId}`);
+  return { ok: true, message: "Event updated." };
 }
 
 export async function runAssignmentsAction(
@@ -91,6 +149,31 @@ export async function runAssignmentsAction(
     return {
       ok: true,
       message: `Assignment complete. Decisions: ${result.decisions?.length ?? 0}. Warnings: ${result.warnings?.length ?? 0}.`,
+    };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
+export async function publishDiscordPostAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+
+  try {
+    const result = await artemisApi<{ channelId: string; messageId: string }>(
+      `/api/v1/events/${eventId}/discord-post`,
+      {
+        method: "POST",
+        body: { actorDiscordId: session.discordUserId },
+      },
+    );
+    revalidatePath(`/events/${eventId}`);
+    return {
+      ok: true,
+      message: `Discord post ready: ${result.channelId}/${result.messageId}.`,
     };
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) };

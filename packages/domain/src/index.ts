@@ -221,6 +221,17 @@ function formatUtcAsTimeZoneParts(date: Date, timeZone: string) {
   };
 }
 
+export const eventUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  imageUrl: z.string().trim().url().max(2048).nullable().optional(),
+  gameSystem: z.string().trim().min(1).optional(),
+  startAt: eventDateSchema.optional(),
+  endAt: eventDateSchema.optional(),
+  actorDiscordId: z.string().min(1),
+});
+export type EventUpdateInput = z.infer<typeof eventUpdateSchema>;
+
 export const rsvpCreateSchema = z.object({
   discordUserId: z.string().min(1),
   displayName: z.string().trim().min(1).max(120),

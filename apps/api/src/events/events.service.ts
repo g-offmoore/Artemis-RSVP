@@ -6,6 +6,7 @@ import {
 import {
   assignParticipantsToTables,
   eventCreateSchema,
+  eventUpdateSchema,
   guestUpdateSchema,
   rsvpCreateSchema,
   tableCreateSchema,
@@ -138,6 +139,43 @@ export class EventsService {
     });
 
     return event;
+  }
+
+  async update(id: string, raw: unknown) {
+    const input = eventUpdateSchema.parse(raw);
+    const existing = await this.prisma.client.event.findUnique({
+      where: { id },
+    });
+    if (!existing) throw new NotFoundException("Event not found");
+
+    const startAt = input.startAt ?? existing.startAt;
+    const endAt = input.endAt ?? existing.endAt;
+    if (endAt <= startAt)
+      throw new BadRequestException("endAt must be after startAt");
+
+    const updates: Record<string, unknown> = {};
+    if (input.title !== undefined) updates.title = input.title;
+    if (input.description !== undefined)
+      updates.description = input.description;
+    if (input.imageUrl !== undefined) updates.imageUrl = input.imageUrl;
+    if (input.gameSystem !== undefined) updates.gameSystem = input.gameSystem;
+    if (input.startAt !== undefined) updates.startAt = input.startAt;
+    if (input.endAt !== undefined) updates.endAt = input.endAt;
+
+    return this.prisma.client.event.update({
+      where: { id },
+      data: {
+        ...updates,
+        auditLogs: {
+          create: {
+            guildId: existing.guildId,
+            actorDiscordId: input.actorDiscordId,
+            action: "event.updated",
+            afterValue: updates,
+          },
+        },
+      },
+    });
   }
 
   async cancel(id: string, actorDiscordId: string) {

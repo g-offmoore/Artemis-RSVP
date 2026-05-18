@@ -1,6 +1,27 @@
 import Link from "next/link";
 import { artemisApi, EventDetail } from "../../../src/lib/artemis-api";
+import { EditEventForm } from "./edit-event-form";
 import { EventManagement } from "./event-management";
+
+const eventTimeZone = process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
+
+function toDateInputValue(isoString: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: eventTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(isoString));
+}
+
+function toTimeInputValue(isoString: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: eventTimeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(isoString));
+}
 
 export default async function EventPage({
   params,
@@ -53,7 +74,19 @@ export default async function EventPage({
       <EventManagement
         eventId={event.id}
         gameSystem={event.gameSystem}
+        messageId={event.messageId}
         status={event.status}
+      />
+
+      <EditEventForm
+        eventId={event.id}
+        defaultTitle={event.title}
+        defaultGameSystem={event.gameSystem}
+        defaultDate={toDateInputValue(event.startAt)}
+        defaultStartTime={toTimeInputValue(event.startAt)}
+        defaultEndTime={toTimeInputValue(event.endAt)}
+        defaultImageUrl={event.imageUrl}
+        defaultDescription={event.description}
       />
 
       <h2>Tables</h2>

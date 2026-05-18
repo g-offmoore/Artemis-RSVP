@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Play, Plus, XCircle } from "lucide-react";
+import { Megaphone, Play, Plus, XCircle } from "lucide-react";
 import {
   ActionState,
   cancelEventAction,
   createTableAction,
+  publishDiscordPostAction,
   runAssignmentsAction,
 } from "../../actions";
 
@@ -14,10 +15,12 @@ const initialState: ActionState = { ok: false, message: "" };
 export function EventManagement({
   eventId,
   gameSystem,
+  messageId,
   status,
 }: {
   eventId: string;
   gameSystem: string;
+  messageId?: string;
   status: string;
 }) {
   const [assignmentState, assignmentAction, assignmentPending] = useActionState(
@@ -30,6 +33,10 @@ export function EventManagement({
   );
   const [tableState, tableAction, tablePending] = useActionState(
     createTableAction,
+    initialState,
+  );
+  const [publishState, publishAction, publishPending] = useActionState(
+    publishDiscordPostAction,
     initialState,
   );
   const vocabulary = eventVocabulary(gameSystem);
@@ -55,6 +62,21 @@ export function EventManagement({
             {assignmentPending ? "Running" : "Run assignments"}
           </button>
         </form>
+        <form action={publishAction}>
+          <input type="hidden" name="eventId" value={eventId} />
+          <button
+            className="button secondary"
+            type="submit"
+            disabled={publishPending || status === "CANCELLED"}
+          >
+            <Megaphone size={16} />
+            {publishPending
+              ? "Publishing"
+              : messageId
+                ? "Refresh Discord post"
+                : "Publish Discord post"}
+          </button>
+        </form>
       </div>
 
       {assignmentState.message ? (
@@ -64,6 +86,13 @@ export function EventManagement({
           }
         >
           {assignmentState.message}
+        </p>
+      ) : null}
+      {publishState.message ? (
+        <p
+          className={publishState.ok ? "form-message ok" : "form-message error"}
+        >
+          {publishState.message}
         </p>
       ) : null}
 
