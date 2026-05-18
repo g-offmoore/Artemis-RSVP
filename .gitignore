@@ -11,3 +11,7 @@ artemis-backups/
 *.dump
 *.sql
 *.log
+
+# Allow tracking Prisma migration SQL files
+!packages/db/prisma/migrations/
+!packages/db/prisma/migrations/**
