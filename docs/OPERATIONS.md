@@ -21,6 +21,7 @@ Current baseline estimate is about `$26/mo+`: `$5` Nanode, `$16` managed Postgre
 - Migrations run as a one-shot deploy job and not alongside heavy traffic.
 - The migrate job uses `DATABASE_MIGRATION_URL` for both `prisma migrate deploy` and `pg-boss migrate`.
 - The API runtime uses `DATABASE_URL`, which should be the limited `artemis_app` credential.
+- After pg-boss migrations, the migrate job grants DML/runtime permissions on the `pgboss` schema to the user parsed from `DATABASE_URL`.
 - Prisma Studio is local or temporary only.
 - Alert if active DB connections exceed 70% of `DATABASE_PLAN_MAX_CONNECTIONS`.
 - If connection pressure appears before CPU/RAM pressure, enable managed PgBouncer or equivalent pooling before scaling app processes.

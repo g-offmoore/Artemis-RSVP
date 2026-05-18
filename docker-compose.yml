@@ -113,6 +113,7 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL is required for migrations}
+      APP_DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required to grant pg-boss runtime permissions}
       PGBOSS_DATABASE_URL: ${DATABASE_MIGRATION_URL:?DATABASE_MIGRATION_URL is required for pg-boss migrations}
       PGBOSS_SCHEMA: ${PGBOSS_SCHEMA:-pgboss}
       PGBOSS_MIGRATION_POOL_MAX: 1
