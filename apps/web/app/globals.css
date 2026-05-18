@@ -19,7 +19,13 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
 
 a {
@@ -79,6 +85,7 @@ a {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
+  margin-bottom: 18px;
 }
 
 .table {
@@ -118,14 +125,30 @@ a {
 .button {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   justify-content: center;
   min-height: 36px;
   padding: 0 12px;
+  border: 0;
   border-radius: 6px;
   background: var(--accent);
   color: white;
   text-decoration: none;
   font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.button.secondary {
+  background: #31475f;
+}
+
+.button.danger {
+  background: var(--danger);
 }
 
 .status {
@@ -139,11 +162,113 @@ a {
   color: var(--muted);
 }
 
+.event-graphic {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 14px 0 20px;
+}
+
+.section-panel {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0;
+  margin: 20px 0;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.section-heading h2 {
+  margin-top: 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-grid.compact {
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(110px, 1fr));
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.span-all {
+  grid-column: 1 / -1;
+}
+
+.form-actions,
+.danger-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.danger-row {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.form-message {
+  margin: 0;
+  white-space: pre-line;
+  font-size: 14px;
+}
+
+.form-message.ok {
+  color: var(--accent);
+}
+
+.form-message.error {
+  color: var(--danger);
+}
+
 @media (max-width: 680px) {
   .topbar,
-  .page-title {
+  .page-title,
+  .section-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .form-grid,
+  .form-grid.compact {
+    grid-template-columns: 1fr;
   }
 
   .table {

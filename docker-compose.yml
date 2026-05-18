@@ -48,7 +48,13 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -73,6 +79,8 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET is required}
       DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:?DISCORD_REDIRECT_URI is required}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?DISCORD_GUILD_ID is required}
+      DISCORD_EVENT_CHANNEL_ID: ${DISCORD_EVENT_CHANNEL_ID:-}
+      ARTEMIS_EVENT_TIME_ZONE: ${ARTEMIS_EVENT_TIME_ZONE:-America/New_York}
       DASHBOARD_ALLOWED_ROLE_IDS: ${DASHBOARD_ALLOWED_ROLE_IDS:?DASHBOARD_ALLOWED_ROLE_IDS is required}
     expose:
       - "3000"
@@ -80,7 +88,13 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -101,6 +115,7 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
       DISCORD_TOKEN: ${DISCORD_TOKEN:?DISCORD_TOKEN is required}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?DISCORD_GUILD_ID is required}
+      ARTEMIS_EVENT_TIME_ZONE: ${ARTEMIS_EVENT_TIME_ZONE:-America/New_York}
       DISCORD_OPS_WEBHOOK_URL: ${DISCORD_OPS_WEBHOOK_URL:-}
     depends_on:
       api:

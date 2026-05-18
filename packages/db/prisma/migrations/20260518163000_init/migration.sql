@@ -101,6 +101,7 @@ CREATE TABLE "Event" (
     "seriesId" TEXT,
     "title" TEXT NOT NULL,
     "description" TEXT,
+    "imageUrl" TEXT,
     "gameSystem" TEXT NOT NULL,
     "status" "EventStatus" NOT NULL DEFAULT 'SCHEDULED',
     "channelId" TEXT NOT NULL,

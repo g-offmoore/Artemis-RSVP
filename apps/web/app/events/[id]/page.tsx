@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { artemisApi, EventDetail } from "../../../src/lib/artemis-api";
+import { EventManagement } from "./event-management";
 
-export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EventPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = await params;
   const event = await artemisApi<EventDetail>(`/api/v1/events/${id}`);
 
@@ -31,9 +36,25 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </div>
         <div className="stat">
           <span className="muted">Assignments</span>
-          <strong>{event.assignments.filter((assignment) => assignment.status === "ASSIGNED").length}</strong>
+          <strong>
+            {
+              event.assignments.filter(
+                (assignment) => assignment.status === "ASSIGNED",
+              ).length
+            }
+          </strong>
         </div>
       </section>
+
+      {event.imageUrl ? (
+        <img className="event-graphic" src={event.imageUrl} alt="" />
+      ) : null}
+
+      <EventManagement
+        eventId={event.id}
+        gameSystem={event.gameSystem}
+        status={event.status}
+      />
 
       <h2>Tables</h2>
       <table className="table">
@@ -72,8 +93,14 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </thead>
         <tbody>
           {event.participants.map((participant) => {
-            const assignment = event.assignments.find((item) => item.eventParticipantId === participant.id && item.status === "ASSIGNED");
-            const table = event.tables.find((item) => item.id === assignment?.eventTableId);
+            const assignment = event.assignments.find(
+              (item) =>
+                item.eventParticipantId === participant.id &&
+                item.status === "ASSIGNED",
+            );
+            const table = event.tables.find(
+              (item) => item.id === assignment?.eventTableId,
+            );
             return (
               <tr key={participant.id}>
                 <td>{participant.displayName}</td>

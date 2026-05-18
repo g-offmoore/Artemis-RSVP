@@ -1,10 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import {
   assignParticipantsToTables,
   eventCreateSchema,
   guestUpdateSchema,
   rsvpCreateSchema,
-  tableCreateSchema
+  tableCreateSchema,
 } from "@artemis/domain";
 import { z } from "zod";
 import { AlertService } from "../common/alert.service.js";
@@ -19,9 +23,9 @@ const attendanceInputSchema = z.object({
       eventTableId: z.string().min(1).optional(),
       rsvpId: z.string().min(1).optional(),
       status: z.enum(["ATTENDED", "NO_SHOW", "WALK_IN", "EXCUSED", "UNKNOWN"]),
-      notes: z.string().optional()
-    })
-  )
+      notes: z.string().optional(),
+    }),
+  ),
 });
 
 @Injectable()
@@ -29,21 +33,31 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly metrics: MetricsService,
-    private readonly alerts: AlertService
+    private readonly alerts: AlertService,
   ) {}
 
   async list(guildId: string) {
     if (!guildId) throw new BadRequestException("guildId is required");
 
-    return this.prisma.client.event.findMany({
-      where: { guildId, status: { notIn: ["CANCELLED", "ARCHIVED"] } },
+    const events = await this.prisma.client.event.findMany({
+      where: {
+        guildId,
+        status: { notIn: ["CANCELLED", "ARCHIVED"] },
+        endAt: { gte: new Date() },
+      },
       orderBy: { startAt: "asc" },
       take: 50,
       include: {
-        _count: { select: { participants: true, tables: true } },
-        tables: true
-      }
+        participants: { where: { assignmentEligible: true } },
+        tables: { where: { status: { notIn: ["CANCELLED", "COMPLETED"] } } },
+      },
     });
+
+    return events.map(({ participants, tables, ...event }) => ({
+      ...event,
+      tables,
+      _count: { participants: participants.length, tables: tables.length },
+    }));
   }
 
   async get(id: string) {
@@ -58,8 +72,8 @@ export class EventsService {
         attendanceRecords: true,
         feedbackRequests: true,
         roles: true,
-        auditLogs: { orderBy: { createdAt: "desc" }, take: 25 }
-      }
+        auditLogs: { orderBy: { createdAt: "desc" }, take: 25 },
+      },
     });
 
     if (!event) throw new NotFoundException("Event not found");
@@ -68,10 +82,33 @@ export class EventsService {
 
   async create(raw: unknown) {
     const input = eventCreateSchema.parse(raw);
-    if (input.endAt <= input.startAt) throw new BadRequestException("endAt must be after startAt");
+    if (input.endAt <= input.startAt)
+      throw new BadRequestException("endAt must be after startAt");
+    if (input.startAt.getTime() < Date.now() - 60 * 60 * 1000) {
+      throw new BadRequestException(
+        "startAt must be in the future. Include the full event date and time.",
+      );
+    }
+    if (input.signupClosesAt && input.signupClosesAt > input.startAt) {
+      throw new BadRequestException("signupClosesAt must be before startAt");
+    }
+    if (
+      input.signupOpensAt &&
+      input.signupClosesAt &&
+      input.signupOpensAt >= input.signupClosesAt
+    ) {
+      throw new BadRequestException(
+        "signupOpensAt must be before signupClosesAt",
+      );
+    }
 
-    const eventType = await this.ensureEventType(input.eventTypeKey, input.gameSystem);
-    const roleCleanupAt = new Date(input.endAt.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const eventType = await this.ensureEventType(
+      input.eventTypeKey,
+      input.gameSystem,
+    );
+    const roleCleanupAt = new Date(
+      input.endAt.getTime() + 14 * 24 * 60 * 60 * 1000,
+    );
 
     const event = await this.prisma.client.event.create({
       data: {
@@ -79,6 +116,7 @@ export class EventsService {
         channelId: input.channelId,
         title: input.title,
         description: input.description,
+        imageUrl: input.imageUrl,
         eventTypeId: eventType.id,
         gameSystem: input.gameSystem,
         startAt: input.startAt,
@@ -92,18 +130,20 @@ export class EventsService {
             guildId: input.guildId,
             actorDiscordId: input.createdByDiscordId,
             action: "event.created",
-            afterValue: input
-          }
-        }
+            afterValue: input,
+          },
+        },
       },
-      include: { eventType: true }
+      include: { eventType: true },
     });
 
     return event;
   }
 
   async cancel(id: string, actorDiscordId: string) {
-    const existing = await this.prisma.client.event.findUnique({ where: { id } });
+    const existing = await this.prisma.client.event.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Event not found");
 
     return this.prisma.client.event.update({
@@ -116,47 +156,63 @@ export class EventsService {
             actorDiscordId,
             action: "event.cancelled",
             beforeValue: { status: existing.status },
-            afterValue: { status: "CANCELLED" }
-          }
-        }
-      }
+            afterValue: { status: "CANCELLED" },
+          },
+        },
+      },
     });
   }
 
   async rsvp(eventId: string, raw: unknown) {
     const input = rsvpCreateSchema.parse(raw);
-    const event = await this.prisma.client.event.findUnique({ where: { id: eventId }, include: { eventType: true } });
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+      include: { eventType: true },
+    });
     if (!event) throw new NotFoundException("Event not found");
+    const selectedCategory = usesDndCategories(event.gameSystem)
+      ? input.selectedCategory
+      : ("MIXED" as const);
 
     return this.prisma.client.$transaction(async (tx) => {
       const profile = await tx.playerProfile.upsert({
-        where: { guildId_discordUserId: { guildId: event.guildId, discordUserId: input.discordUserId } },
+        where: {
+          guildId_discordUserId: {
+            guildId: event.guildId,
+            discordUserId: input.discordUserId,
+          },
+        },
         create: {
           guildId: event.guildId,
           discordUserId: input.discordUserId,
           displayName: input.displayName,
-          defaultCategory: input.selectedCategory
+          defaultCategory: selectedCategory,
         },
         update: {
           displayName: input.displayName,
-          roleDetectedCategory: input.selectedCategory
-        }
+          roleDetectedCategory: selectedCategory,
+        },
       });
 
       const rsvp = await tx.rSVP.upsert({
-        where: { eventId_primaryDiscordUserId: { eventId, primaryDiscordUserId: input.discordUserId } },
+        where: {
+          eventId_primaryDiscordUserId: {
+            eventId,
+            primaryDiscordUserId: input.discordUserId,
+          },
+        },
         create: {
           eventId,
           primaryDiscordUserId: input.discordUserId,
           playerProfileId: profile.id,
-          selectedCategory: input.selectedCategory,
+          selectedCategory,
           partyKey: input.discordUserId,
-          source: input.source
+          source: input.source,
         },
         update: {
-          selectedCategory: input.selectedCategory,
-          status: "GOING"
-        }
+          selectedCategory,
+          status: "GOING",
+        },
       });
 
       const primary = await tx.eventParticipant.upsert({
@@ -169,15 +225,15 @@ export class EventsService {
           participantType: "PRIMARY",
           discordUserId: input.discordUserId,
           displayName: input.displayName,
-          playerCategory: input.selectedCategory,
+          playerCategory: selectedCategory,
           partyKey: input.discordUserId,
-          createdByDiscordId: input.discordUserId
+          createdByDiscordId: input.discordUserId,
         },
         update: {
           displayName: input.displayName,
-          playerCategory: input.selectedCategory,
-          confirmationStatus: "UNKNOWN"
-        }
+          playerCategory: selectedCategory,
+          confirmationStatus: "UNKNOWN",
+        },
       });
 
       await tx.auditLog.create({
@@ -186,42 +242,68 @@ export class EventsService {
           eventId,
           actorDiscordId: input.discordUserId,
           action: "rsvp.upserted",
-          afterValue: { rsvpId: rsvp.id, participantId: primary.id, selectedCategory: input.selectedCategory }
-        }
+          afterValue: {
+            rsvpId: rsvp.id,
+            participantId: primary.id,
+            selectedCategory,
+          },
+        },
       });
 
       return tx.rSVP.findUnique({
         where: { id: rsvp.id },
-        include: { participants: true }
+        include: { participants: true },
       });
     });
   }
 
   async updateGuests(eventId: string, discordUserId: string, raw: unknown) {
-    const input = guestUpdateSchema.parse({ ...(typeof raw === "object" && raw ? raw : {}), discordUserId });
-    const event = await this.prisma.client.event.findUnique({ where: { id: eventId }, include: { eventType: true } });
+    const input = guestUpdateSchema.parse({
+      ...(typeof raw === "object" && raw ? raw : {}),
+      discordUserId,
+    });
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+      include: { eventType: true },
+    });
     if (!event) throw new NotFoundException("Event not found");
     if (input.guests.length > event.eventType.maxGuestsPerRsvp) {
-      throw new BadRequestException(`This event allows at most ${event.eventType.maxGuestsPerRsvp} guests`);
+      throw new BadRequestException(
+        `This event allows at most ${event.eventType.maxGuestsPerRsvp} guests`,
+      );
     }
 
     const rsvp = await this.prisma.client.rSVP.findUnique({
-      where: { eventId_primaryDiscordUserId: { eventId, primaryDiscordUserId: discordUserId } },
-      include: { participants: true }
+      where: {
+        eventId_primaryDiscordUserId: {
+          eventId,
+          primaryDiscordUserId: discordUserId,
+        },
+      },
+      include: { participants: true },
     });
     if (!rsvp) throw new NotFoundException("RSVP not found");
 
     return this.prisma.client.$transaction(async (tx) => {
       await tx.eventParticipant.deleteMany({
-        where: { eventId, rsvpId: rsvp.id, participantType: "GUEST" }
+        where: { eventId, rsvpId: rsvp.id, participantType: "GUEST" },
       });
 
       for (const guest of input.guests) {
         const guestProfile = guest.discordUserId
           ? await tx.playerProfile.upsert({
-              where: { guildId_discordUserId: { guildId: event.guildId, discordUserId: guest.discordUserId } },
-              create: { guildId: event.guildId, discordUserId: guest.discordUserId, displayName: guest.displayName },
-              update: { displayName: guest.displayName }
+              where: {
+                guildId_discordUserId: {
+                  guildId: event.guildId,
+                  discordUserId: guest.discordUserId,
+                },
+              },
+              create: {
+                guildId: event.guildId,
+                discordUserId: guest.discordUserId,
+                displayName: guest.displayName,
+              },
+              update: { displayName: guest.displayName },
             })
           : null;
 
@@ -240,8 +322,8 @@ export class EventsService {
             feedbackEligible: Boolean(guest.discordUserId),
             messageEligible: Boolean(guest.discordUserId),
             roleEligible: Boolean(guest.discordUserId),
-            createdByDiscordId: discordUserId
-          }
+            createdByDiscordId: discordUserId,
+          },
         });
       }
 
@@ -251,24 +333,37 @@ export class EventsService {
           eventId,
           actorDiscordId: discordUserId,
           action: "rsvp.guests.updated",
-          afterValue: { guestCount: input.guests.length }
-        }
+          afterValue: { guestCount: input.guests.length },
+        },
       });
 
-      return tx.rSVP.findUnique({ where: { id: rsvp.id }, include: { participants: true } });
+      return tx.rSVP.findUnique({
+        where: { id: rsvp.id },
+        include: { participants: true },
+      });
     });
   }
 
   async cancelRsvp(eventId: string, discordUserId: string) {
-    const event = await this.prisma.client.event.findUnique({ where: { id: eventId } });
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+    });
     if (!event) throw new NotFoundException("Event not found");
 
     return this.prisma.client.rSVP.update({
-      where: { eventId_primaryDiscordUserId: { eventId, primaryDiscordUserId: discordUserId } },
+      where: {
+        eventId_primaryDiscordUserId: {
+          eventId,
+          primaryDiscordUserId: discordUserId,
+        },
+      },
       data: {
         status: "CANCELLED",
         participants: {
-          updateMany: { where: {}, data: { assignmentEligible: false, attendanceEligible: false } }
+          updateMany: {
+            where: {},
+            data: { assignmentEligible: false, attendanceEligible: false },
+          },
         },
         event: {
           update: {
@@ -277,56 +372,84 @@ export class EventsService {
                 guildId: event.guildId,
                 actorDiscordId: discordUserId,
                 action: "rsvp.cancelled",
-                afterValue: { discordUserId }
-              }
-            }
-          }
-        }
-      }
+                afterValue: { discordUserId },
+              },
+            },
+          },
+        },
+      },
     });
   }
 
   async createTable(eventId: string, raw: unknown) {
     const input = tableCreateSchema.parse(raw);
-    const event = await this.prisma.client.event.findUnique({ where: { id: eventId }, include: { eventType: true } });
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+      include: { eventType: true },
+    });
     if (!event) throw new NotFoundException("Event not found");
+    const tableType = usesDndCategories(event.gameSystem)
+      ? input.tableType
+      : ("MIXED" as const);
+    const effectiveInput = { ...input, tableType };
 
     const ambassador = await this.prisma.client.ambassadorProfile.upsert({
-      where: { guildId_discordUserId: { guildId: event.guildId, discordUserId: input.ambassadorDiscordId } },
+      where: {
+        guildId_discordUserId: {
+          guildId: event.guildId,
+          discordUserId: input.ambassadorDiscordId,
+        },
+      },
       create: {
         guildId: event.guildId,
         discordUserId: input.ambassadorDiscordId,
-        displayName: input.ambassadorDiscordId,
-        defaultTableType: input.tableType,
+        displayName: input.ambassadorDisplayName ?? input.ambassadorDiscordId,
+        defaultTableType: tableType,
         defaultSoftCap: input.softCap,
-        defaultHardCap: input.hardCap
+        defaultHardCap: input.hardCap,
       },
       update: {
-        active: true
-      }
+        active: true,
+        displayName: input.ambassadorDisplayName ?? undefined,
+      },
     });
 
     return this.prisma.client.$transaction(async (tx) => {
-      const table = await tx.eventTable.create({
-        data: {
+      const data = {
+        title: input.title ?? `${ambassador.displayName}'s Table`,
+        tableType,
+        softCap: input.softCap,
+        hardCap: input.hardCap,
+        description: input.description,
+      };
+      const existing = await tx.eventTable.findFirst({
+        where: {
           eventId,
           ambassadorProfileId: ambassador.id,
-          title: input.title ?? `${ambassador.displayName}'s Table`,
-          tableType: input.tableType,
-          softCap: input.softCap,
-          hardCap: input.hardCap,
-          description: input.description
-        }
+          status: { not: "CANCELLED" },
+        },
       });
+      const table = existing
+        ? await tx.eventTable.update({
+            where: { id: existing.id },
+            data,
+          })
+        : await tx.eventTable.create({
+            data: {
+              eventId,
+              ambassadorProfileId: ambassador.id,
+              ...data,
+            },
+          });
 
       await tx.auditLog.create({
         data: {
           guildId: event.guildId,
           eventId,
           actorDiscordId: input.ambassadorDiscordId,
-          action: "table.created",
-          afterValue: input
-        }
+          action: existing ? "table.updated" : "table.created",
+          afterValue: effectiveInput,
+        },
       });
 
       return table;
@@ -338,8 +461,8 @@ export class EventsService {
       where: { id: eventId },
       include: {
         tables: { include: { assignments: true } },
-        participants: { include: { assignments: true } }
-      }
+        participants: { include: { assignments: true } },
+      },
     });
     if (!event) throw new NotFoundException("Event not found");
 
@@ -352,8 +475,10 @@ export class EventsService {
           partyKey: participant.partyKey,
           category: participant.playerCategory,
           lockedTableId:
-            participant.assignments.find((assignment) => assignment.locked && assignment.status === "ASSIGNED")?.eventTableId ??
-            null
+            participant.assignments.find(
+              (assignment) =>
+                assignment.locked && assignment.status === "ASSIGNED",
+            )?.eventTableId ?? null,
         }));
 
       const tables = event.tables.map((table) => ({
@@ -364,16 +489,26 @@ export class EventsService {
         hardCap: table.hardCap,
         locked: table.locked || table.status === "LOCKED",
         existingParticipantIds: table.assignments
-          .filter((assignment) => assignment.locked && assignment.status === "ASSIGNED")
-          .map((assignment) => assignment.eventParticipantId)
+          .filter(
+            (assignment) =>
+              assignment.locked && assignment.status === "ASSIGNED",
+          )
+          .map((assignment) => assignment.eventParticipantId),
       }));
 
       const result = assignParticipantsToTables(participants, tables);
 
       await this.prisma.client.$transaction(async (tx) => {
         await tx.assignment.updateMany({
-          where: { eventId, locked: false, status: { in: ["ASSIGNED", "WAITLISTED", "UNASSIGNED"] } },
-          data: { status: "REMOVED", reason: "Removed by assignment recalculation" }
+          where: {
+            eventId,
+            locked: false,
+            status: { in: ["ASSIGNED", "WAITLISTED", "UNASSIGNED"] },
+          },
+          data: {
+            status: "REMOVED",
+            reason: "Removed by assignment recalculation",
+          },
         });
 
         for (const decision of result.decisions) {
@@ -384,8 +519,8 @@ export class EventsService {
               eventTableId: decision.tableId,
               status: decision.status,
               reason: decision.reason,
-              assignedBy: actorDiscordId
-            }
+              assignedBy: actorDiscordId,
+            },
           });
         }
 
@@ -395,8 +530,8 @@ export class EventsService {
             eventId,
             actorDiscordId,
             action: "assignment.recalculated",
-            afterValue: result
-          }
+            afterValue: result,
+          },
         });
       });
 
@@ -406,7 +541,7 @@ export class EventsService {
       await this.alerts.sendOpsAlert("Assignment run failed", {
         eventId,
         actorDiscordId,
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
@@ -414,13 +549,20 @@ export class EventsService {
 
   async confirmAttendance(eventId: string, raw: unknown) {
     const input = attendanceInputSchema.parse(raw);
-    const event = await this.prisma.client.event.findUnique({ where: { id: eventId } });
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+    });
     if (!event) throw new NotFoundException("Event not found");
 
     return this.prisma.client.$transaction(async (tx) => {
       for (const record of input.records) {
         await tx.attendanceRecord.upsert({
-          where: { eventId_eventParticipantId: { eventId, eventParticipantId: record.eventParticipantId } },
+          where: {
+            eventId_eventParticipantId: {
+              eventId,
+              eventParticipantId: record.eventParticipantId,
+            },
+          },
           create: {
             eventId,
             eventParticipantId: record.eventParticipantId,
@@ -428,20 +570,20 @@ export class EventsService {
             rsvpId: record.rsvpId,
             status: record.status,
             notes: record.notes,
-            confirmedByDiscordId: input.actorDiscordId
+            confirmedByDiscordId: input.actorDiscordId,
           },
           update: {
             eventTableId: record.eventTableId,
             status: record.status,
             notes: record.notes,
             confirmedByDiscordId: input.actorDiscordId,
-            confirmedAt: new Date()
-          }
+            confirmedAt: new Date(),
+          },
         });
 
         await tx.eventParticipant.update({
           where: { id: record.eventParticipantId },
-          data: { confirmationStatus: record.status }
+          data: { confirmationStatus: record.status },
         });
       }
 
@@ -451,8 +593,8 @@ export class EventsService {
           eventId,
           actorDiscordId: input.actorDiscordId,
           action: "attendance.confirmed",
-          afterValue: { count: input.records.length }
-        }
+          afterValue: { count: input.records.length },
+        },
       });
 
       return { ok: true, count: input.records.length };
@@ -460,20 +602,30 @@ export class EventsService {
   }
 
   async refreshDbConnectionMetric() {
-    const rows = await this.prisma.client.$queryRaw<Array<{ count: bigint | number }>>`
+    const rows = await this.prisma.client.$queryRaw<
+      Array<{ count: bigint | number }>
+    >`
       SELECT count(*)::int AS count
       FROM pg_stat_activity
       WHERE datname = current_database()
     `;
     const count = Number(rows[0]?.count ?? 0);
-    const limit = Number.parseInt(process.env.DATABASE_PLAN_MAX_CONNECTIONS ?? "25", 10);
-    const threshold = Number.parseFloat(process.env.DATABASE_CONNECTION_ALERT_THRESHOLD ?? "0.7");
+    const limit = Number.parseInt(
+      process.env.DATABASE_PLAN_MAX_CONNECTIONS ?? "25",
+      10,
+    );
+    const threshold = Number.parseFloat(
+      process.env.DATABASE_CONNECTION_ALERT_THRESHOLD ?? "0.7",
+    );
 
     this.metrics.dbConnections.set(count);
     this.metrics.dbConnectionLimit.set(limit);
 
     if (count >= limit * threshold) {
-      await this.alerts.sendOpsAlert("Database connection usage exceeded threshold", { count, limit, threshold });
+      await this.alerts.sendOpsAlert(
+        "Database connection usage exceeded threshold",
+        { count, limit, threshold },
+      );
     }
   }
 
@@ -483,9 +635,14 @@ export class EventsService {
       create: {
         key,
         name: key === "dnd_session_night" ? "D&D Session Night" : key,
-        defaultGameSystem: gameSystem
+        defaultGameSystem: gameSystem,
       },
-      update: {}
+      update: {},
     });
   }
+}
+
+function usesDndCategories(gameSystem: string) {
+  const value = gameSystem.trim().toLowerCase();
+  return value === "d&d" || value === "dnd" || value.includes("dungeons");
 }

@@ -1,20 +1,31 @@
 import Link from "next/link";
 import { CalendarDays, UsersRound } from "lucide-react";
 import { artemisApi, EventSummary } from "../src/lib/artemis-api";
+import { EventCreateForm } from "./event-create-form";
 
 export default async function DashboardPage() {
   const guildId = process.env.DISCORD_GUILD_ID;
-  const events = guildId ? await artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`) : [];
+  const events = guildId
+    ? await artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`)
+    : [];
 
-  const totalParticipants = events.reduce((sum, event) => sum + (event._count?.participants ?? 0), 0);
-  const totalTables = events.reduce((sum, event) => sum + (event._count?.tables ?? 0), 0);
+  const totalParticipants = events.reduce(
+    (sum, event) => sum + (event._count?.participants ?? 0),
+    0,
+  );
+  const totalTables = events.reduce(
+    (sum, event) => sum + (event._count?.tables ?? 0),
+    0,
+  );
 
   return (
     <>
       <section className="page-title">
         <div>
           <h1>Event Operations</h1>
-          <p className="muted">Upcoming event state, table coverage, and RSVP pressure.</p>
+          <p className="muted">
+            Upcoming event state, table coverage, and RSVP pressure.
+          </p>
         </div>
       </section>
 
@@ -34,6 +45,10 @@ export default async function DashboardPage() {
           <strong>{totalTables}</strong>
         </div>
       </section>
+
+      <EventCreateForm
+        defaultChannelId={process.env.DISCORD_EVENT_CHANNEL_ID}
+      />
 
       <h2>Upcoming Events</h2>
       <table className="table">

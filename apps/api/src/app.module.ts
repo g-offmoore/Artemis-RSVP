@@ -1,7 +1,8 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 import { AlertModule } from "./common/alert.module.js";
 import { ApiTokenGuard } from "./common/api-token.guard.js";
+import { ZodExceptionFilter } from "./common/zod-exception.filter.js";
 import { EventsModule } from "./events/events.module.js";
 import { HealthController } from "./health/health.controller.js";
 import { JobsService } from "./jobs/jobs.service.js";
@@ -15,8 +16,12 @@ import { PrismaModule } from "./prisma/prisma.module.js";
     JobsService,
     {
       provide: APP_GUARD,
-      useClass: ApiTokenGuard
-    }
-  ]
+      useClass: ApiTokenGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: ZodExceptionFilter,
+    },
+  ],
 })
 export class AppModule {}
