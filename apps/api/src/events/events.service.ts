@@ -153,7 +153,14 @@ export class EventsService {
     if (endAt <= startAt)
       throw new BadRequestException("endAt must be after startAt");
 
-    const updates: Record<string, unknown> = {};
+    const updates: {
+      title?: string;
+      description?: string | null;
+      imageUrl?: string | null;
+      gameSystem?: string;
+      startAt?: Date;
+      endAt?: Date;
+    } = {};
     if (input.title !== undefined) updates.title = input.title;
     if (input.description !== undefined)
       updates.description = input.description;
