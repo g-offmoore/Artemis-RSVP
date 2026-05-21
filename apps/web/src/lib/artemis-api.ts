@@ -51,12 +51,15 @@ export type GuildSettings = {
 
 export type EventDetail = EventSummary & {
   description?: string;
+  assignmentLockedAt?: string;
   participants: Array<{
     id: string;
     displayName: string;
     participantType: string;
     playerCategory: string;
     confirmationStatus: string;
+    signupRole?: string;
+    backupDmStatus?: string;
   }>;
   tables: Array<{
     id: string;
@@ -72,11 +75,24 @@ export type EventDetail = EventSummary & {
     eventTableId?: string;
     status: string;
     reason: string;
+    reasonCode?: string;
+    locked: boolean;
   }>;
   auditLogs: Array<{
     id: string;
     action: string;
     actorDiscordId: string;
     createdAt: string;
+    reasonCode?: string;
+  }>;
+  messageJobs?: Array<{
+    id: string;
+    messageType: string;
+    targetId: string;
+    scheduledFor: string;
+    status: string;
+    sentAt?: string;
+    failedAt?: string;
+    lastError?: string;
   }>;
 };

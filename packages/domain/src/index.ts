@@ -76,6 +76,14 @@ export const attendanceStatusSchema = z.enum([
 ]);
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>;
 
+export const signupRoleSchema = z.enum([
+  "PLAYER",
+  "TABLE_DM",
+  "BACKUP_DM",
+  "AMBASSADOR",
+]);
+export type SignupRole = z.infer<typeof signupRoleSchema>;
+
 export const eventCreateSchema = z.object({
   guildId: z.string().min(1),
   channelId: z.string().min(1),
@@ -270,6 +278,7 @@ export const rsvpCreateSchema = z.object({
   discordUserId: z.string().min(1),
   displayName: z.string().trim().min(1).max(120),
   selectedCategory: playerCategorySchema.default("NORMAL"),
+  signupRole: signupRoleSchema.default("PLAYER"),
   source: z.string().min(1).default("discord"),
 });
 export type RsvpCreateInput = z.infer<typeof rsvpCreateSchema>;
@@ -308,6 +317,83 @@ export const tableCreateSchema = z
   });
 export type TableCreateInput = z.infer<typeof tableCreateSchema>;
 
+// ─── Eligibility rule schema ───────────────────────────────────────────────
+
+export const eligibilityRuleSchema = z.object({
+  eventId: z.string().min(1),
+  signupRole: signupRoleSchema,
+  allowedDiscordRoleIds: z.array(z.string().min(1)).default([]),
+  requiredDiscordRoleIds: z.array(z.string().min(1)).default([]),
+  deniedDiscordRoleIds: z.array(z.string().min(1)).default([]),
+  requiresApproval: z.boolean().default(false),
+});
+export type EligibilityRuleInput = z.infer<typeof eligibilityRuleSchema>;
+
+export type EligibilityCheckInput = {
+  signupRole: SignupRole;
+  memberDiscordRoleIds: string[];
+};
+
+export type EligibilityCheckResult =
+  | { eligible: true }
+  | { eligible: false; reason: string; requiresApproval?: boolean };
+
+export function checkEligibility(
+  rule: {
+    allowedDiscordRoleIds: string[];
+    requiredDiscordRoleIds: string[];
+    deniedDiscordRoleIds: string[];
+    requiresApproval: boolean;
+  } | null,
+  memberRoleIds: string[],
+): EligibilityCheckResult {
+  if (!rule) return { eligible: true };
+
+  // Denied roles are always a hard block regardless of other roles.
+  for (const denied of rule.deniedDiscordRoleIds) {
+    if (memberRoleIds.includes(denied)) {
+      return { eligible: false, reason: "You are not eligible for this signup option." };
+    }
+  }
+
+  // Allowed: at least one of the allowed roles must be present (when any are configured).
+  if (rule.allowedDiscordRoleIds.length > 0) {
+    const hasAllowed = rule.allowedDiscordRoleIds.some((id) =>
+      memberRoleIds.includes(id),
+    );
+    if (!hasAllowed) {
+      return { eligible: false, reason: "You do not have the required role for this signup option." };
+    }
+  }
+
+  // Required: every listed role must be present.
+  for (const required of rule.requiredDiscordRoleIds) {
+    if (!memberRoleIds.includes(required)) {
+      return { eligible: false, reason: "You do not have the required role for this signup option." };
+    }
+  }
+
+  if (rule.requiresApproval) {
+    return { eligible: true, requiresApproval: true } as { eligible: true; requiresApproval: true };
+  }
+
+  return { eligible: true };
+}
+
+// ─── Assignment engine ────────────────────────────────────────────────────
+
+// Reason codes recorded with every assignment decision.
+export type AssignmentReasonCode =
+  | "assigned_to_matching_table"
+  | "waitlisted_no_matching_dm"
+  | "waitlisted_no_capacity"
+  | "waitlisted_track_mismatch"
+  | "waitlisted_not_eligible"
+  | "waitlisted_group_cannot_fit"
+  | "waitlisted_conflict_constraint"
+  | "needs_manual_approval"
+  | "locked_assignment_preserved";
+
 export type AssignmentParticipant = {
   id: string;
   displayName: string;
@@ -315,6 +401,14 @@ export type AssignmentParticipant = {
   category: PlayerCategory;
   lockedTableId?: string | null;
   restrictions?: string[];
+  // Avoid constraints are hard blocks
+  avoidParticipantIds?: string[];
+  avoidTableIds?: string[];
+  // Soft scoring: preferred tables get first consideration
+  preferredTableIds?: string[];
+  // Seating group membership
+  seatingGroupId?: string | null;
+  seatingGroupSplitPolicy?: "DO_NOT_SPLIT" | "SPLIT_IF_NEEDED" | "ORGANIZER_DECIDES";
 };
 
 export type AssignmentTable = {
@@ -324,6 +418,8 @@ export type AssignmentTable = {
   softCap: number;
   hardCap: number;
   locked: boolean;
+  // Only tables with a confirmed DM create capacity for player assignment.
+  hasDm: boolean;
   existingParticipantIds: string[];
 };
 
@@ -334,7 +430,9 @@ export type AssignmentWarning = {
     | "SOFT_CAP_EXCEEDED"
     | "LOCKED_ASSIGNMENT"
     | "CATEGORY_MISMATCH"
-    | "PARTY_WAITLISTED";
+    | "PARTY_WAITLISTED"
+    | "AVOID_CONSTRAINT_APPLIED"
+    | "GROUP_SPLIT";
   message: string;
   participantIds?: string[];
   tableId?: string;
@@ -344,6 +442,7 @@ export type AssignmentDecision = {
   participantId: string;
   tableId: string | null;
   status: "ASSIGNED" | "WAITLISTED";
+  reasonCode: AssignmentReasonCode;
   reason: string;
 };
 
@@ -357,27 +456,16 @@ type Party = {
   participants: AssignmentParticipant[];
 };
 
+// Hard rule: a player may only be assigned to a table whose type exactly
+// matches the player's selected category. NORMAL → NORMAL only,
+// HEROIC → HEROIC only, MIXED → MIXED only.
+// This prevents the bug where a Normal player is seated at a Heroic DM's
+// table (or vice versa) when no same-track table is available.
 export function canParticipantUseTable(
   participant: AssignmentParticipant,
   table: AssignmentTable,
 ): boolean {
-  if (participant.category === "NORMAL") {
-    return table.tableType === "NORMAL" || table.tableType === "MIXED";
-  }
-
-  if (participant.category === "HEROIC") {
-    return (
-      table.tableType === "HEROIC" ||
-      table.tableType === "NORMAL" ||
-      table.tableType === "MIXED"
-    );
-  }
-
-  return (
-    table.tableType === "MIXED" ||
-    table.tableType === "NORMAL" ||
-    table.tableType === "HEROIC"
-  );
+  return participant.category === table.tableType;
 }
 
 export function assignParticipantsToTables(
@@ -390,6 +478,16 @@ export function assignParticipantsToTables(
 
   for (const table of tables) {
     counts.set(table.id, table.existingParticipantIds.length);
+  }
+
+  // Build a map of who is assigned to which table so far (for avoid-player checks).
+  // This starts from locked/existing assignments and grows as we assign.
+  const tableOccupants = new Map<string, Set<string>>();
+  for (const table of tables) {
+    tableOccupants.set(
+      table.id,
+      new Set(table.existingParticipantIds),
+    );
   }
 
   const sortedParties = groupParties(participants).sort(
@@ -406,8 +504,10 @@ export function assignParticipantsToTables(
           participantId: participant.id,
           tableId: lockedTableId,
           status: "ASSIGNED",
+          reasonCode: "locked_assignment_preserved",
           reason: "Locked assignment preserved",
         });
+        tableOccupants.get(lockedTableId)?.add(participant.id);
       }
       warnings.push({
         code: "LOCKED_ASSIGNMENT",
@@ -419,15 +519,48 @@ export function assignParticipantsToTables(
       continue;
     }
 
+    // Collect all participant IDs in this party for avoid-participant checks.
+    const partyIds = new Set(party.participants.map((p) => p.id));
+
+    // Collect avoid constraints from all party members.
+    const allAvoidParticipantIds = new Set(
+      party.participants.flatMap((p) => p.avoidParticipantIds ?? []),
+    );
+    const allAvoidTableIds = new Set(
+      party.participants.flatMap((p) => p.avoidTableIds ?? []),
+    );
+
+    // Tables this party prefers (soft — considered first in scoring).
+    const anyPreferredTableIds = new Set(
+      party.participants.flatMap((p) => p.preferredTableIds ?? []),
+    );
+
     const eligible = tables
       .filter((table) => !table.locked)
+      // Only tables with a confirmed DM are eligible for player assignment.
+      .filter((table) => table.hasDm)
+      // Track must match exactly.
       .filter((table) =>
         party.participants.every((participant) =>
           canParticipantUseTable(participant, table),
         ),
       )
+      // Hard avoid-table constraint (DM avoid).
+      .filter((table) => !allAvoidTableIds.has(table.id))
       .map((table) => {
         const current = counts.get(table.id) ?? 0;
+        const occupants = tableOccupants.get(table.id) ?? new Set<string>();
+
+        // Hard avoid-participant constraint: no one at this table may be in
+        // the avoid list of any party member, and vice versa.
+        const hasAvoidConflict =
+          allAvoidParticipantIds.size > 0 &&
+          [...occupants].some(
+            (occupantId) =>
+              !partyIds.has(occupantId) &&
+              allAvoidParticipantIds.has(occupantId),
+          );
+
         return {
           table,
           current,
@@ -436,10 +569,27 @@ export function assignParticipantsToTables(
             0,
             current + party.participants.length - table.softCap,
           ),
+          isPreferred: anyPreferredTableIds.has(table.id),
+          hasAvoidConflict,
         };
+      })
+      // Filter out tables with hard avoid-participant conflicts.
+      .filter((candidate) => {
+        if (candidate.hasAvoidConflict) {
+          warnings.push({
+            code: "AVOID_CONSTRAINT_APPLIED",
+            message: "A table was excluded due to an avoid-participant constraint.",
+            participantIds: party.participants.map((p) => p.id),
+            tableId: candidate.table.id,
+          });
+          return false;
+        }
+        return true;
       })
       .filter((candidate) => candidate.after <= candidate.table.hardCap)
       .sort((a, b) => {
+        // Preferred tables come first (soft scoring).
+        if (a.isPreferred !== b.isPreferred) return a.isPreferred ? -1 : 1;
         if (a.softOverflow !== b.softOverflow)
           return a.softOverflow - b.softOverflow;
         if (a.current !== b.current) return a.current - b.current;
@@ -448,24 +598,60 @@ export function assignParticipantsToTables(
 
     const chosen = eligible[0];
     if (!chosen) {
+      // Determine the most specific reason for waitlisting.
+      const trackCompatible = tables.filter(
+        (t) =>
+          !t.locked &&
+          party.participants.every((p) => canParticipantUseTable(p, t)),
+      );
+      const hasMatchingDm = trackCompatible.some((t) => t.hasDm);
+      const hasCapacity = trackCompatible
+        .filter((t) => t.hasDm)
+        .some(
+          (t) =>
+            (counts.get(t.id) ?? 0) + party.participants.length <= t.hardCap,
+        );
+
+      let reasonCode: AssignmentReasonCode;
+      let reason: string;
+
+      if (trackCompatible.length === 0) {
+        reasonCode = "waitlisted_track_mismatch";
+        reason = `No table matches the selected track (${party.participants[0]?.category ?? "unknown"})`;
+      } else if (!hasMatchingDm) {
+        reasonCode = "waitlisted_no_matching_dm";
+        reason = `No confirmed DM for the ${party.participants[0]?.category ?? "selected"} track`;
+      } else if (!hasCapacity) {
+        reasonCode = "waitlisted_no_capacity";
+        reason = "All matching tables are at hard-cap capacity";
+      } else {
+        reasonCode = "waitlisted_conflict_constraint";
+        reason = "No eligible table available due to conflict constraints";
+      }
+
       for (const participant of party.participants) {
         decisions.push({
           participantId: participant.id,
           tableId: null,
           status: "WAITLISTED",
-          reason: "No eligible table had enough hard-cap space for this party",
+          reasonCode,
+          reason,
         });
       }
       warnings.push({
         code: "PARTY_WAITLISTED",
-        message:
-          "A party was waitlisted because no eligible table had enough hard-cap space.",
+        message: `Party waitlisted: ${reason}`,
         participantIds: party.participants.map((participant) => participant.id),
       });
       continue;
     }
 
+    // Update tracking state for subsequent party assignments.
     counts.set(chosen.table.id, chosen.after);
+    const occupants = tableOccupants.get(chosen.table.id) ?? new Set<string>();
+    for (const p of party.participants) occupants.add(p.id);
+    tableOccupants.set(chosen.table.id, occupants);
+
     if (chosen.after > chosen.table.softCap) {
       warnings.push({
         code: "SOFT_CAP_EXCEEDED",
@@ -480,6 +666,7 @@ export function assignParticipantsToTables(
         participantId: participant.id,
         tableId: chosen.table.id,
         status: "ASSIGNED",
+        reasonCode: "assigned_to_matching_table",
         reason:
           chosen.after <= chosen.table.softCap
             ? "Eligible table with the lowest current load under soft cap"
@@ -552,4 +739,66 @@ export function temporaryRoleName(
     0,
     100,
   );
+}
+
+// ─── Message job scheduling helpers ──────────────────────────────────────
+
+// Default offsets for automatically scheduled messages.
+export const MESSAGE_JOB_DEFAULTS = {
+  preEventOffsetMs: 2 * 60 * 60 * 1000,      // 2 hours before startAt
+  postEventOffsetMs: 60 * 60 * 1000,          // 1 hour after endAt
+  reminderOffsetMs: 4 * 60 * 60 * 1000,       // 4 hours before startAt — organizer warning
+  backupDmAskOffsetMs: 3 * 60 * 60 * 1000,   // 3 hours before startAt — backup DM consent ask
+} as const;
+
+export function computePreEventScheduledFor(startAt: Date): Date {
+  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.preEventOffsetMs);
+}
+
+export function computePostEventScheduledFor(endAt: Date): Date {
+  return new Date(endAt.getTime() + MESSAGE_JOB_DEFAULTS.postEventOffsetMs);
+}
+
+// T-4h: sends organizer a summary of projected seating, DM gaps, backup candidates.
+export function computeReminderScheduledFor(startAt: Date): Date {
+  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.reminderOffsetMs);
+}
+
+// T-3h: checks for DM shortages and sends backup DM consent asks if needed.
+export function computeBackupDmAskScheduledFor(startAt: Date): Date {
+  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.backupDmAskOffsetMs);
+}
+
+// ─── Backup DM Discord button helpers ────────────────────────────────────
+
+// Canonical custom_id format for backup DM accept/decline buttons.
+// Shared between the API (message sender) and the bot (interaction handler).
+export function backupDmCustomId(
+  action: "accept" | "decline",
+  eventId: string,
+  participantId: string,
+): string {
+  return `backupdm:${action}:${eventId}:${participantId}`;
+}
+
+export type ParsedBackupDmCustomId = {
+  action: "accept" | "decline";
+  eventId: string;
+  participantId: string;
+};
+
+// Returns null when the customId does not match the backup DM format.
+export function parseBackupDmCustomId(
+  customId: string,
+): ParsedBackupDmCustomId | null {
+  const parts = customId.split(":");
+  if (parts.length < 4 || parts[0] !== "backupdm") return null;
+  const action = parts[1];
+  if (action !== "accept" && action !== "decline") return null;
+  // eventId and participantId may themselves contain colons (cuid2 does not,
+  // but be defensive: rejoin everything after index 2 split at the last colon).
+  const eventId = parts[2];
+  const participantId = parts.slice(3).join(":");
+  if (!eventId || !participantId) return null;
+  return { action, eventId, participantId };
 }

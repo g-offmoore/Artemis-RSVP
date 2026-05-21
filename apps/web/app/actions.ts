@@ -197,6 +197,61 @@ export async function cancelEventAction(
   }
 }
 
+export async function lockAssignmentsAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+
+  try {
+    const result = await artemisApi<{ lockedAt: string; decisions: number; warnings: unknown[] }>(
+      `/api/v1/events/${eventId}/assignments/lock`,
+      {
+        method: "POST",
+        body: {
+          actorDiscordId: session.discordUserId,
+          reason: optionalValueOf(formData, "reason"),
+        },
+      },
+    );
+    revalidatePath(`/events/${eventId}`);
+    return {
+      ok: true,
+      message: `Assignments locked. ${result.decisions} confirmed. Warnings: ${result.warnings?.length ?? 0}.`,
+    };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
+export async function backupDmActionAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+  const participantId = valueOf(formData, "participantId");
+  const action = valueOf(formData, "action") as "pull" | "release" | "decline";
+
+  try {
+    await artemisApi(`/api/v1/events/${eventId}/backup-dm/action`, {
+      method: "POST",
+      body: {
+        actorDiscordId: session.discordUserId,
+        participantId,
+        action,
+        reason: optionalValueOf(formData, "reason"),
+      },
+    });
+    revalidatePath(`/events/${eventId}`);
+    const labels = { pull: "pulled to DM", release: "released", decline: "marked declined" };
+    return { ok: true, message: `Backup DM ${labels[action] ?? action}.` };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
 export async function createTableAction(
   _state: ActionState = emptyState,
   formData: FormData,

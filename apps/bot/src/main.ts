@@ -19,6 +19,7 @@ import {
 } from "discord.js";
 import {
   EventDateTimeInputError,
+  parseBackupDmCustomId,
   parseEventDateTimeParts,
 } from "@artemis/domain";
 import pino from "pino";
@@ -514,16 +515,63 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     const assignment = event.assignments?.find(
       (item: any) =>
         item.eventParticipantId === participant?.id &&
-        item.status === "ASSIGNED",
+        (item.status === "ASSIGNED" || item.status === "PROJECTED_SEATED" || item.status === "CONFIRMED_SEATED"),
     );
     const table = event.tables?.find(
       (item: any) => item.id === assignment?.eventTableId,
     );
     await interaction.editReply({
       content: table
-        ? `Your current table assignment is ${table.title}. Staff may adjust assignments before the event locks.`
+        ? `Your current table assignment is **${table.title}**. Staff may adjust assignments before the event locks.`
         : "You do not have a table assignment yet.",
     });
+    return;
+  }
+
+  // Backup DM accept / decline buttons — sent via Discord DM by the message worker.
+  const parsed = parseBackupDmCustomId(interaction.customId);
+  if (parsed) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (parsed.action === "accept") {
+      await api.backupDmAction(parsed.eventId, {
+        actorDiscordId: interaction.user.id,
+        participantId: parsed.participantId,
+        action: "pull",
+      });
+
+      await interaction.editReply({
+        content:
+          "✅ You have been assigned as DM. Your player seat has been released. Thank you for stepping up!",
+      });
+
+      await sendOpsAlert("Backup DM accepted", {
+        eventId: parsed.eventId,
+        discordUserId: interaction.user.id,
+        participantId: parsed.participantId,
+      });
+      return;
+    }
+
+    if (parsed.action === "decline") {
+      await api.backupDmAction(parsed.eventId, {
+        actorDiscordId: interaction.user.id,
+        participantId: parsed.participantId,
+        action: "decline",
+      });
+
+      await interaction.editReply({
+        content:
+          "Your decline has been recorded. Your player RSVP is unchanged. Organizers will find another backup DM.",
+      });
+
+      await sendOpsAlert("Backup DM declined", {
+        eventId: parsed.eventId,
+        discordUserId: interaction.user.id,
+        participantId: parsed.participantId,
+      });
+      return;
+    }
   }
 }
 

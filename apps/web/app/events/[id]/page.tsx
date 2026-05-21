@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { artemisApi, EventDetail, GuildSettings } from "../../../src/lib/artemis-api";
+import { BackupDmPanel } from "./backup-dm-panel";
 import { EditEventForm } from "./edit-event-form";
 import { EventManagement } from "./event-management";
 
@@ -29,13 +30,24 @@ export default async function EventPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [event, settings] = await Promise.all([
+  const [event, settings, messageJobs, backupDmCandidates] = await Promise.all([
     artemisApi<EventDetail>(`/api/v1/events/${id}`),
     guildId
       ? artemisApi<GuildSettings>(
           `/api/v1/guild-settings?guildId=${guildId}`,
         ).catch(() => null)
       : Promise.resolve(null),
+    artemisApi<EventDetail["messageJobs"]>(`/api/v1/events/${id}/message-jobs`).catch(() => []),
+    artemisApi<Array<{
+      rsvpId: string;
+      discordUserId: string;
+      participantId: string | null;
+      backupDmStatus: string | null;
+      rsvpCreatedAt: string;
+      lastDmDate: string | null;
+      dmCountLast30Days: number;
+      backupPullCountLast90Days: number;
+    }>>(`/api/v1/events/${id}/backup-dm/candidates`).catch(() => []),
   ]);
   const eventTimeZone =
     settings?.defaultTimezone ??
@@ -89,15 +101,31 @@ export default async function EventPage({
           <strong>{event.tables.length}</strong>
         </div>
         <div className="stat">
-          <span className="muted">Assignments</span>
+          <span className="muted">
+            {event.assignmentLockedAt ? "Confirmed Seated" : "Projected Seated"}
+          </span>
           <strong>
             {
-              event.assignments.filter(
-                (assignment) => assignment.status === "ASSIGNED",
+              event.assignments.filter((a) =>
+                event.assignmentLockedAt
+                  ? a.status === "CONFIRMED_SEATED"
+                  : a.status === "PROJECTED_SEATED" || a.status === "ASSIGNED",
               ).length
             }
           </strong>
         </div>
+        {event.assignmentLockedAt && (
+          <div className="stat">
+            <span className="muted">Locked</span>
+            <strong style={{ fontSize: "0.85rem" }}>
+              {new Intl.DateTimeFormat("en-US", {
+                timeZone: eventTimeZone,
+                dateStyle: "short",
+                timeStyle: "short",
+              }).format(new Date(event.assignmentLockedAt))}
+            </strong>
+          </div>
+        )}
       </section>
 
       {event.imageUrl ? (
@@ -109,7 +137,10 @@ export default async function EventPage({
         gameSystem={event.gameSystem}
         messageId={event.messageId}
         status={event.status}
+        assignmentLockedAt={event.assignmentLockedAt}
       />
+
+      <BackupDmPanel eventId={event.id} candidates={backupDmCandidates ?? []} />
 
       <EditEventForm
         eventId={event.id}
@@ -152,34 +183,82 @@ export default async function EventPage({
         <thead>
           <tr>
             <th>Name</th>
-            <th>Type</th>
             <th>Category</th>
+            <th>Role</th>
             <th>Attendance</th>
             <th>Assignment</th>
           </tr>
         </thead>
         <tbody>
           {event.participants.map((participant) => {
+            const seatedStatuses = [
+              "ASSIGNED",
+              "PROJECTED_SEATED",
+              "CONFIRMED_SEATED",
+            ];
             const assignment = event.assignments.find(
               (item) =>
                 item.eventParticipantId === participant.id &&
-                item.status === "ASSIGNED",
+                seatedStatuses.includes(item.status),
             );
             const table = event.tables.find(
               (item) => item.id === assignment?.eventTableId,
             );
+            const assignmentLabel = assignment
+              ? table?.title
+                ? `${table.title}${assignment.status.startsWith("PROJECTED") ? " (projected)" : ""}`
+                : assignment.status
+              : "Unassigned";
             return (
               <tr key={participant.id}>
                 <td>{participant.displayName}</td>
-                <td>{participant.participantType}</td>
                 <td>{participant.playerCategory}</td>
+                <td>{participant.signupRole ?? "PLAYER"}</td>
                 <td>{participant.confirmationStatus}</td>
-                <td>{table?.title ?? "Unassigned"}</td>
+                <td>{assignmentLabel}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      {messageJobs && messageJobs.length > 0 && (
+        <>
+          <h2>Scheduled Messages</h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Scheduled For</th>
+                <th>Status</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {messageJobs.map((job) => (
+                <tr key={job.id}>
+                  <td>{job.messageType}</td>
+                  <td>
+                    {new Intl.DateTimeFormat("en-US", {
+                      timeZone: eventTimeZone,
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    }).format(new Date(job.scheduledFor))}
+                  </td>
+                  <td>{job.status}</td>
+                  <td>
+                    {job.status === "SENT" && job.sentAt
+                      ? `Sent ${new Date(job.sentAt).toLocaleString()}`
+                      : job.status === "FAILED"
+                        ? job.lastError ?? "Unknown error"
+                        : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       <h2>Recent Audit</h2>
       <table className="table">

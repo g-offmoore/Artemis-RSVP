@@ -39,6 +39,29 @@ enum RSVPStatus {
   REMOVED
 }
 
+enum SignupRole {
+  PLAYER
+  TABLE_DM
+  BACKUP_DM
+  AMBASSADOR
+}
+
+enum BackupDmStatus {
+  BACKUP_AVAILABLE_AS_PLAYER
+  BACKUP_ON_STANDBY
+  BACKUP_PULL_PENDING
+  BACKUP_PULLED_TO_DM
+  BACKUP_RELEASED_AS_PLAYER
+  BACKUP_DECLINED_PULL
+  BACKUP_UNAVAILABLE
+}
+
+enum BackupPullMode {
+  MANUAL
+  CONSENT_REQUIRED
+  AUTO
+}
+
 enum TableStatus {
   OPEN
   FULL
@@ -48,11 +71,20 @@ enum TableStatus {
 }
 
 enum AssignmentStatus {
+  // Legacy values kept for compatibility
   ASSIGNED
   WAITLISTED
   UNASSIGNED
   REMOVED
   MOVED
+  // Projected (pre-lock) statuses
+  PROJECTED_SEATED
+  PROJECTED_WAITLISTED
+  // Confirmed (post-lock) statuses
+  CONFIRMED_SEATED
+  CONFIRMED_DM
+  CONFIRMED_WAITLISTED
+  CANCELLED
 }
 
 enum AttendanceStatus {
@@ -82,6 +114,59 @@ enum NotificationStatus {
   SENT
   FAILED
   SKIPPED
+}
+
+enum EventMessageType {
+  PRE_EVENT
+  POST_EVENT
+  REMINDER
+  CUSTOM
+}
+
+enum MessageTargetType {
+  CHANNEL
+  USER
+  ROLE
+}
+
+enum MessageJobStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum SeatingGroupStatus {
+  PENDING
+  CONFIRMED
+  PARTIAL
+  DENIED
+}
+
+enum SplitPolicy {
+  DO_NOT_SPLIT
+  SPLIT_IF_NEEDED
+  ORGANIZER_DECIDES
+}
+
+enum SeatingGroupMemberStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+}
+
+enum PreferenceType {
+  PREFER_DM
+  AVOID_DM
+  PREFER_PLAYER
+  AVOID_PLAYER
+  NOTE
+}
+
+enum PreferenceStrength {
+  SOFT
+  HARD
 }
 
 model GuildSettings {
@@ -144,39 +229,49 @@ model EventSeries {
 }
 
 model Event {
-  id                   String             @id @default(cuid())
-  guildId              String
-  eventTypeId          String
-  eventType            EventType          @relation(fields: [eventTypeId], references: [id])
-  seriesId             String?
-  series               EventSeries?       @relation(fields: [seriesId], references: [id])
-  title                String
-  description          String?
-  imageUrl             String?
-  gameSystem           String
-  status               EventStatus        @default(SCHEDULED)
-  channelId            String
-  messageId            String?
-  startAt              DateTime
-  endAt                DateTime
-  signupOpensAt        DateTime?
-  signupClosesAt       DateTime?
-  roleCleanupAt        DateTime?
-  feedbackWindowHours  Int                @default(72)
-  assignmentNotifiedAt DateTime?
-  lockedAt             DateTime?
-  createdByDiscordId   String
-  tables               EventTable[]
-  rsvps                RSVP[]
-  participants         EventParticipant[]
-  assignments          Assignment[]
-  attendanceRecords    AttendanceRecord[]
-  feedbackRequests     FeedbackRequest[]
-  roles                EventRole[]
-  auditLogs            AuditLog[]
-  notifications        NotificationLog[]
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                          String               @id @default(cuid())
+  guildId                     String
+  eventTypeId                 String
+  eventType                   EventType            @relation(fields: [eventTypeId], references: [id])
+  seriesId                    String?
+  series                      EventSeries?         @relation(fields: [seriesId], references: [id])
+  title                       String
+  description                 String?
+  imageUrl                    String?
+  gameSystem                  String
+  status                      EventStatus          @default(SCHEDULED)
+  channelId                   String
+  messageId                   String?
+  startAt                     DateTime
+  endAt                       DateTime
+  signupOpensAt               DateTime?
+  signupClosesAt              DateTime?
+  roleCleanupAt               DateTime?
+  feedbackWindowHours         Int                  @default(72)
+  assignmentNotifiedAt        DateTime?
+  lockedAt                    DateTime?
+  // Assignment lock: T-{N} minutes before startAt, converted to confirmed
+  assignmentLockOffsetMinutes Int                  @default(120)
+  assignmentLockedAt          DateTime?
+  // Backup DM policy
+  backupPullMode              BackupPullMode       @default(CONSENT_REQUIRED)
+  backupPullDeadline          DateTime?
+  createdByDiscordId          String
+  tables                      EventTable[]
+  rsvps                       RSVP[]
+  participants                EventParticipant[]
+  assignments                 Assignment[]
+  attendanceRecords           AttendanceRecord[]
+  feedbackRequests            FeedbackRequest[]
+  roles                       EventRole[]
+  auditLogs                   AuditLog[]
+  notifications               NotificationLog[]
+  messageJobs                 EventMessageJob[]
+  eligibilityRules            EventEligibilityRule[]
+  seatingGroups               EventSeatingGroup[]
+  signupPreferences           EventSignupPreference[]
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
 
   @@index([guildId, startAt])
   @@index([status, startAt])
@@ -195,6 +290,10 @@ model AmbassadorProfile {
   tags                 String[]          @default([])
   active               Boolean           @default(true)
   notes                String?
+  // Burnout / fairness tracking
+  lastDmDate           DateTime?
+  dmCountLast30Days    Int               @default(0)
+  backupPullCountLast90Days Int          @default(0)
   tables               EventTable[]
   feedbackRequests     FeedbackRequest[]
   createdAt            DateTime          @default(now())
@@ -255,6 +354,7 @@ model RSVP {
   playerProfileId      String?
   playerProfile        PlayerProfile?     @relation(fields: [playerProfileId], references: [id])
   selectedCategory     PlayerCategory     @default(NORMAL)
+  signupRole           SignupRole          @default(PLAYER)
   status               RSVPStatus         @default(GOING)
   partyKey             String
   source               String             @default("discord")
@@ -264,6 +364,7 @@ model RSVP {
 
   @@unique([eventId, primaryDiscordUserId])
   @@index([eventId, status])
+  @@index([eventId, signupRole])
 }
 
 model EventParticipant {
@@ -275,6 +376,8 @@ model EventParticipant {
   playerProfileId         String?
   playerProfile           PlayerProfile?     @relation(fields: [playerProfileId], references: [id])
   participantType         ParticipantType
+  signupRole              SignupRole?
+  backupDmStatus          BackupDmStatus?
   discordUserId           String?
   enteredName             String?
   displayName             String
@@ -300,6 +403,7 @@ model EventParticipant {
 
   @@index([eventId, participantType])
   @@index([eventId, partyKey])
+  @@index([eventId, signupRole])
   @@index([discordUserId])
 }
 
@@ -312,6 +416,7 @@ model Assignment {
   eventTableId       String?
   eventTable         EventTable?      @relation(fields: [eventTableId], references: [id])
   status             AssignmentStatus
+  reasonCode         String?
   locked             Boolean          @default(false)
   reason             String
   assignedBy         String           @default("system")
@@ -394,6 +499,96 @@ model NotificationLog {
   @@index([status, createdAt])
 }
 
+// Persistent scheduled message jobs with observable state.
+// Created on event create/update; updated (not duplicated) on reschedule.
+model EventMessageJob {
+  id           String           @id @default(cuid())
+  eventId      String
+  event        Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  messageType  EventMessageType
+  targetType   MessageTargetType
+  targetId     String
+  scheduledFor DateTime
+  status       MessageJobStatus @default(PENDING)
+  sentAt       DateTime?
+  failedAt     DateTime?
+  lastError    String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([eventId, messageType, targetId])
+  @@index([eventId, status])
+  @@index([scheduledFor, status])
+}
+
+// Per-event Discord role requirements for each signup role type.
+// Server enforces these; UI may hide unavailable options.
+model EventEligibilityRule {
+  id                     String     @id @default(cuid())
+  eventId                String
+  event                  Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  signupRole             SignupRole
+  allowedDiscordRoleIds  String[]   @default([])
+  requiredDiscordRoleIds String[]   @default([])
+  deniedDiscordRoleIds   String[]   @default([])
+  requiresApproval       Boolean    @default(false)
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  @@unique([eventId, signupRole])
+  @@index([eventId])
+}
+
+// Player-requested seating groups (couples, friend groups, etc.).
+model EventSeatingGroup {
+  id                String                    @id @default(cuid())
+  eventId           String
+  event             Event                     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  groupCode         String                    @unique @default(cuid())
+  requestedByUserId String
+  status            SeatingGroupStatus        @default(PENDING)
+  splitPolicy       SplitPolicy               @default(ORGANIZER_DECIDES)
+  maxSize           Int                       @default(8)
+  members           EventSeatingGroupMember[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@index([eventId])
+  @@index([groupCode])
+}
+
+model EventSeatingGroupMember {
+  id        String                   @id @default(cuid())
+  groupId   String
+  group     EventSeatingGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String
+  status    SeatingGroupMemberStatus @default(INVITED)
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+}
+
+// Per-event player preferences: prefer/avoid DM or other player.
+// Avoid constraints are hard blocks; prefer constraints are soft scoring.
+// Visibility is organizer_only to protect privacy.
+model EventSignupPreference {
+  id             String             @id @default(cuid())
+  eventId        String
+  event          Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId         String
+  preferenceType PreferenceType
+  targetUserId   String?
+  note           String?
+  strength       PreferenceStrength @default(SOFT)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([eventId, userId])
+  @@index([eventId, preferenceType])
+}
+
 model AuditLog {
   id             String   @id @default(cuid())
   guildId        String
@@ -401,6 +596,7 @@ model AuditLog {
   event          Event?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
   actorDiscordId String
   action         String
+  reasonCode     String?
   beforeValue    Json?
   afterValue     Json?
   createdAt      DateTime @default(now())

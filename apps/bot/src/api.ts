@@ -69,6 +69,16 @@ export class ArtemisApi {
     });
   }
 
+  async backupDmAction(
+    eventId: string,
+    payload: { actorDiscordId: string; participantId: string; action: "pull" | "release" | "decline"; reason?: string },
+  ) {
+    return this.request(`/api/v1/events/${eventId}/backup-dm/action`, {
+      method: "POST",
+      body: payload,
+    });
+  }
+
   async getGuildSettings(guildId: string) {
     return this.request(
       `/api/v1/guild-settings?guildId=${encodeURIComponent(guildId)}`,

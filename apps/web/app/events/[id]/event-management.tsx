@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Megaphone, Play, Plus, XCircle } from "lucide-react";
+import { Lock, Megaphone, Play, Plus, XCircle } from "lucide-react";
 import {
   ActionState,
   cancelEventAction,
   createTableAction,
+  lockAssignmentsAction,
   publishDiscordPostAction,
   runAssignmentsAction,
 } from "../../actions";
@@ -17,14 +18,20 @@ export function EventManagement({
   gameSystem,
   messageId,
   status,
+  assignmentLockedAt,
 }: {
   eventId: string;
   gameSystem: string;
   messageId?: string;
   status: string;
+  assignmentLockedAt?: string;
 }) {
   const [assignmentState, assignmentAction, assignmentPending] = useActionState(
     runAssignmentsAction,
+    initialState,
+  );
+  const [lockState, lockAction, lockPending] = useActionState(
+    lockAssignmentsAction,
     initialState,
   );
   const [cancelState, cancelAction, cancelPending] = useActionState(
@@ -40,6 +47,7 @@ export function EventManagement({
     initialState,
   );
   const vocabulary = eventVocabulary(gameSystem);
+  const isLocked = Boolean(assignmentLockedAt);
 
   return (
     <section className="section-panel" aria-labelledby="manage-event-heading">
@@ -60,6 +68,26 @@ export function EventManagement({
           >
             <Play size={16} />
             {assignmentPending ? "Running" : "Run assignments"}
+          </button>
+        </form>
+        <form
+          action={lockAction}
+          onSubmit={(e) => {
+            if (isLocked) { e.preventDefault(); return; }
+            if (!window.confirm(
+              "Lock final assignments for this event? This will confirm projected seating. After lock, changes should be organizer-only emergency changes."
+            )) e.preventDefault();
+          }}
+        >
+          <input type="hidden" name="eventId" value={eventId} />
+          <button
+            className="button secondary"
+            type="submit"
+            disabled={lockPending || isLocked || status === "CANCELLED"}
+            title={isLocked ? `Locked ${new Date(assignmentLockedAt!).toLocaleString()}` : undefined}
+          >
+            <Lock size={16} />
+            {lockPending ? "Locking…" : isLocked ? "Assignments locked" : "Lock assignments"}
           </button>
         </form>
         <form action={publishAction}>
@@ -86,6 +114,11 @@ export function EventManagement({
           }
         >
           {assignmentState.message}
+        </p>
+      ) : null}
+      {lockState.message ? (
+        <p className={lockState.ok ? "form-message ok" : "form-message error"}>
+          {lockState.message}
         </p>
       ) : null}
       {publishState.message ? (

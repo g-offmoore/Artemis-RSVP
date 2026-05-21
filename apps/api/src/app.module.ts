@@ -7,15 +7,14 @@ import { ZodExceptionFilter } from "./common/zod-exception.filter.js";
 import { EventsModule } from "./events/events.module.js";
 import { GuildSettingsModule } from "./guild-settings/guild-settings.module.js";
 import { HealthController } from "./health/health.controller.js";
-import { JobsService } from "./jobs/jobs.service.js";
+import { JobsModule } from "./jobs/jobs.module.js";
 import { MetricsModule } from "./metrics/metrics.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 
 @Module({
-  imports: [PrismaModule, MetricsModule, AlertModule, EventsModule, GuildSettingsModule],
+  imports: [PrismaModule, MetricsModule, AlertModule, JobsModule, EventsModule, GuildSettingsModule],
   controllers: [HealthController],
   providers: [
-    JobsService,
     {
       provide: APP_GUARD,
       useClass: ApiTokenGuard,
