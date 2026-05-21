@@ -31,6 +31,16 @@ export class MessageJobWorkerService implements OnModuleInit {
     }
 
     const boss = this.jobs.client;
+
+    // Queue must exist before schedule() references it.
+    // Swallow "already exists" so restarts are idempotent.
+    try {
+      await boss.createQueue(JOB_NAME);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.toLowerCase().includes("already exists")) throw err;
+    }
+
     await boss.schedule(JOB_NAME, "* * * * *", {});
     await boss.work(JOB_NAME, async () => {
       await this.runPoll();
