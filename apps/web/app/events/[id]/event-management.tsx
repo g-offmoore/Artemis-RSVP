@@ -1,17 +1,29 @@
 "use client";
 
 import { useActionState } from "react";
-import { Lock, Megaphone, Play, Plus, XCircle } from "lucide-react";
+import { AlertTriangle, Lock, Megaphone, Play, Plus, RefreshCw, XCircle } from "lucide-react";
 import {
   ActionState,
   cancelEventAction,
   createTableAction,
   lockAssignmentsAction,
   publishDiscordPostAction,
+  retryEventRoleAction,
   runAssignmentsAction,
 } from "../../actions";
 
 const initialState: ActionState = { ok: false, message: "" };
+
+type EventRole = {
+  id: string;
+  roleType: string;
+  name: string;
+  discordRoleId?: string | null;
+  failedAt?: string | null;
+  lastError?: string | null;
+  expiresAt: string;
+  deletedAt?: string | null;
+};
 
 export function EventManagement({
   eventId,
@@ -19,12 +31,14 @@ export function EventManagement({
   messageId,
   status,
   assignmentLockedAt,
+  roles,
 }: {
   eventId: string;
   gameSystem: string;
   messageId?: string;
   status: string;
   assignmentLockedAt?: string;
+  roles?: EventRole[];
 }) {
   const [assignmentState, assignmentAction, assignmentPending] = useActionState(
     runAssignmentsAction,
@@ -46,7 +60,15 @@ export function EventManagement({
     publishDiscordPostAction,
     initialState,
   );
+  const [roleRetryState, roleRetryAction, roleRetryPending] = useActionState(
+    retryEventRoleAction,
+    initialState,
+  );
   const vocabulary = eventVocabulary(gameSystem);
+  const playerRole = roles?.find((r) => r.roleType === "PLAYER");
+  const roleFailed = playerRole && !playerRole.discordRoleId && playerRole.failedAt;
+  const rolePending = playerRole && !playerRole.discordRoleId && !playerRole.failedAt;
+  const roleExpired = playerRole?.deletedAt;
   const isLocked = Boolean(assignmentLockedAt);
 
   return (
@@ -90,28 +112,32 @@ export function EventManagement({
             {lockPending ? "Locking…" : isLocked ? "Assignments locked" : "Lock assignments"}
           </button>
         </form>
-        <form
-          action={publishAction}
-          onSubmit={(e) => {
-            if (messageId && !window.confirm("Refresh the Discord post? The embed will be updated with the latest event data.")) {
-              e.preventDefault();
-            }
-          }}
-        >
-          <input type="hidden" name="eventId" value={eventId} />
-          <button
-            className="button secondary"
-            type="submit"
-            disabled={publishPending || status === "CANCELLED"}
-          >
-            <Megaphone size={16} />
-            {publishPending
-              ? "Publishing"
-              : messageId
-                ? "Refresh Discord post"
-                : "Publish Discord post"}
-          </button>
-        </form>
+        {messageId ? (
+          <form action={publishAction}>
+            <input type="hidden" name="eventId" value={eventId} />
+            <button
+              className="button secondary"
+              type="submit"
+              disabled={publishPending || status === "CANCELLED"}
+              title="Update the existing Discord post with the latest event data"
+            >
+              <RefreshCw size={16} />
+              {publishPending ? "Syncing…" : "Sync Discord post"}
+            </button>
+          </form>
+        ) : (
+          <form action={publishAction}>
+            <input type="hidden" name="eventId" value={eventId} />
+            <button
+              className="button secondary"
+              type="submit"
+              disabled={publishPending || status === "CANCELLED"}
+            >
+              <Megaphone size={16} />
+              {publishPending ? "Publishing…" : "Publish Discord post"}
+            </button>
+          </form>
+        )}
       </div>
 
       {assignmentState.message ? (
@@ -135,6 +161,42 @@ export function EventManagement({
           {publishState.message}
         </p>
       ) : null}
+
+      {roleFailed && (
+        <div className="role-failure-panel">
+          <p className="form-message error">
+            <AlertTriangle size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: "0.3rem" }} />
+            <strong>Discord event role creation failed.</strong>{" "}
+            {playerRole.lastError ?? "Unknown error."}
+          </p>
+          <form action={roleRetryAction} style={{ marginTop: "0.5rem" }}>
+            <input type="hidden" name="eventId" value={eventId} />
+            <button
+              className="button secondary"
+              type="submit"
+              disabled={roleRetryPending}
+            >
+              <RefreshCw size={14} />
+              {roleRetryPending ? "Retrying…" : "Retry role creation"}
+            </button>
+            {roleRetryState.message ? (
+              <p className={roleRetryState.ok ? "form-message ok" : "form-message error"}>
+                {roleRetryState.message}
+              </p>
+            ) : null}
+          </form>
+        </div>
+      )}
+      {rolePending && !roleFailed && (
+        <p className="form-message" style={{ color: "var(--color-muted, #888)" }}>
+          Discord event role: pending creation…
+        </p>
+      )}
+      {roleExpired && (
+        <p className="form-message" style={{ color: "var(--color-muted, #888)" }}>
+          Discord event role expired and cleaned up.
+        </p>
+      )}
 
       <form className="form-grid compact" action={tableAction}>
         <input type="hidden" name="eventId" value={eventId} />

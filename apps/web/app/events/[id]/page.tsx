@@ -69,6 +69,14 @@ export default async function EventPage({
               dateStyle: "medium",
               timeStyle: "short",
             }).format(new Date(event.startAt))}
+            {event.seriesId ? (
+              <>
+                {" "}&mdash;{" "}
+                <Link href={`/series/${event.seriesId}`} className="muted">
+                  Series &rarr;
+                </Link>
+              </>
+            ) : null}
           </p>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.25rem" }}>
@@ -138,6 +146,7 @@ export default async function EventPage({
         messageId={event.messageId}
         status={event.status}
         assignmentLockedAt={event.assignmentLockedAt}
+        roles={event.roles}
       />
 
       <BackupDmPanel eventId={event.id} candidates={backupDmCandidates ?? []} />
@@ -152,6 +161,7 @@ export default async function EventPage({
         defaultImageUrl={event.imageUrl}
         defaultDescription={event.description}
         defaultTimezone={eventTimeZone}
+        seriesId={event.seriesId}
       />
 
       <h2>Tables</h2>

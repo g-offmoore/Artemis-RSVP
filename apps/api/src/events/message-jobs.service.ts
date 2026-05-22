@@ -100,6 +100,35 @@ export class MessageJobsService {
     this.logger.log(`Rescheduled PENDING message jobs for event ${event.id}`);
   }
 
+  // Schedule a single one-off message job (e.g. BACKUP_DM_FOLLOW_UP).
+  // Uses upsert so scheduling the same job twice updates the time rather than duplicating.
+  async scheduleJob(params: {
+    eventId: string;
+    messageType: "PRE_EVENT" | "POST_EVENT" | "REMINDER" | "CUSTOM" | "ASSIGNMENT_LOCK" | "BACKUP_DM_FOLLOW_UP";
+    targetType: "CHANNEL" | "USER" | "ROLE";
+    targetId: string;
+    scheduledFor: Date;
+  }): Promise<void> {
+    await this.prisma.client.eventMessageJob.upsert({
+      where: {
+        eventId_messageType_targetId: {
+          eventId: params.eventId,
+          messageType: params.messageType,
+          targetId: params.targetId,
+        },
+      },
+      create: {
+        eventId: params.eventId,
+        messageType: params.messageType,
+        targetType: params.targetType,
+        targetId: params.targetId,
+        scheduledFor: params.scheduledFor,
+        status: "PENDING",
+      },
+      update: { scheduledFor: params.scheduledFor },
+    });
+  }
+
   // Cancel all pending jobs for a cancelled event.
   async cancelEventMessages(eventId: string): Promise<void> {
     await this.prisma.client.eventMessageJob.updateMany({

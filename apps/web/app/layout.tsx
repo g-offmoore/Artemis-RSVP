@@ -20,6 +20,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               Artemis
             </Link>
             <nav className="nav">
+              <Link href="/">Events</Link>
+              <Link href="/series">Series</Link>
               <span>{session.username}</span>
               <a href="/api/auth/logout">Sign out</a>
             </nav>

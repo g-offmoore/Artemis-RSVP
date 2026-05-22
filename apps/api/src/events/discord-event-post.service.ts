@@ -6,7 +6,6 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
-import { DiscordRoleService } from "./discord-role.service.js";
 
 type DiscordEmbed = {
   title: string;
@@ -29,10 +28,7 @@ type DiscordComponent = {
 export class DiscordEventPostService {
   private readonly logger = new Logger(DiscordEventPostService.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly discordRole: DiscordRoleService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async publishEventPost(eventId: string, actorDiscordId: string) {
     const token = process.env.DISCORD_TOKEN;
@@ -98,14 +94,6 @@ export class DiscordEventPostService {
           },
         },
       });
-
-      // §12.6: Create a temporary Discord role for this event after publish (fire-and-forget).
-      void this.discordRole.ensureEventRole({
-        id: event.id,
-        guildId: event.guildId,
-        title: event.title,
-        endAt: event.endAt,
-      }).catch((err) => this.logger.warn({ err, eventId }, "Could not ensure event role after publish"));
 
       return { ok: true, channelId: event.channelId, messageId };
     } catch (error) {

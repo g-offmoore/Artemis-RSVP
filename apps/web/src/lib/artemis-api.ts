@@ -49,8 +49,31 @@ export type GuildSettings = {
   feedbackFormUrl?: string;
 };
 
+export type EventSeriesSummary = {
+  id: string;
+  name: string;
+  recurrenceRule: string;
+  defaultGameSystem: string;
+  defaultChannelId: string;
+  defaultStartHour: number;
+  defaultStartMinute: number;
+  defaultDurationMinutes: number;
+  createdAt: string;
+  _count: { events: number };
+};
+
+export type EventSeriesDetail = EventSeriesSummary & {
+  events: Array<{
+    id: string;
+    title: string;
+    startAt: string;
+    status: string;
+  }>;
+};
+
 export type EventDetail = EventSummary & {
   description?: string;
+  seriesId?: string | null;
   assignmentLockedAt?: string;
   participants: Array<{
     id: string;
@@ -100,5 +123,15 @@ export type EventDetail = EventSummary & {
     sentAt?: string;
     failedAt?: string;
     lastError?: string;
+  }>;
+  roles?: Array<{
+    id: string;
+    roleType: string;
+    name: string;
+    discordRoleId?: string | null;
+    failedAt?: string | null;
+    lastError?: string | null;
+    expiresAt: string;
+    deletedAt?: string | null;
   }>;
 };

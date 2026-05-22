@@ -9,6 +9,7 @@ import {
   Query,
 } from "@nestjs/common";
 import { DiscordEventPostService } from "./discord-event-post.service.js";
+import { DiscordRoleService } from "./discord-role.service.js";
 import { EventsService } from "./events.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
 
@@ -18,6 +19,7 @@ export class EventsController {
     private readonly events: EventsService,
     private readonly discordPosts: DiscordEventPostService,
     private readonly messageJobs: MessageJobsService,
+    private readonly discordRole: DiscordRoleService,
   ) {}
 
   @Get()
@@ -135,6 +137,14 @@ export class EventsController {
   @Get(":id/message-jobs")
   listMessageJobs(@Param("id") id: string) {
     return this.messageJobs.listForEvent(id);
+  }
+
+  // ─── Event role ───────────────────────────────────────────────────────────
+
+  // Retry Discord role creation after a failure (manual remediation, §12.6).
+  @Post(":id/roles/retry")
+  retryEventRole(@Param("id") id: string) {
+    return this.discordRole.retryEventRole(id);
   }
 
   // ─── Backup DM candidates ─────────────────────────────────────────────────

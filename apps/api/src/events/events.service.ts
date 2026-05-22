@@ -164,6 +164,7 @@ export class EventsService {
         signupClosesAt: input.signupClosesAt,
         roleCleanupAt,
         createdByDiscordId: input.createdByDiscordId,
+        ...(input.seriesId ? { seriesId: input.seriesId } : {}),
         auditLogs: {
           create: {
             guildId: input.guildId,
@@ -183,6 +184,35 @@ export class EventsService {
       startAt: event.startAt,
       endAt: event.endAt,
       createdByDiscordId: event.createdByDiscordId,
+    });
+
+    // §12.6: Create the temporary Discord player role at event creation, not publish.
+    // ensureEventRole records a pending/failed state if Discord is unavailable and
+    // sends a private DM to the organizer — never silently drops the failure.
+    void this.discordRole.ensureEventRole({
+      id: event.id,
+      guildId: event.guildId,
+      title: event.title,
+      endAt: event.endAt,
+      createdByDiscordId: event.createdByDiscordId,
+    }).then((result) => {
+      if (!result.ok) {
+        // Role failure already logged and organizer notified inside ensureEventRole.
+        this.logger.warn({ eventId: event.id, error: result.error }, "Event role creation failed at event.create");
+      }
+    });
+
+    // §12.6: Create the private event thread (fire-and-forget; failures logged and organizer notified).
+    void this.discordRole.ensureEventThread({
+      id: event.id,
+      guildId: event.guildId,
+      channelId: event.channelId,
+      title: event.title,
+      createdByDiscordId: event.createdByDiscordId,
+    }).then((result) => {
+      if (!result.ok) {
+        this.logger.warn({ eventId: event.id, error: result.error }, "Event thread creation failed at event.create");
+      }
     });
 
     return event;
@@ -240,6 +270,27 @@ export class EventsService {
         endAt: event.endAt,
         createdByDiscordId: existing.createdByDiscordId,
       });
+    }
+
+    // applyToFuture: propagate non-time updates to all future occurrences in the same series.
+    if (input.applyToFuture && existing.seriesId) {
+      const futureUpdates: { title?: string; description?: string | null; imageUrl?: string | null; gameSystem?: string } = {};
+      if (input.title !== undefined) futureUpdates.title = input.title;
+      if (input.description !== undefined) futureUpdates.description = input.description;
+      if (input.imageUrl !== undefined) futureUpdates.imageUrl = input.imageUrl;
+      if (input.gameSystem !== undefined) futureUpdates.gameSystem = input.gameSystem;
+
+      if (Object.keys(futureUpdates).length > 0) {
+        await this.prisma.client.event.updateMany({
+          where: {
+            seriesId: existing.seriesId,
+            id: { not: id },
+            startAt: { gte: existing.startAt },
+            status: { not: "CANCELLED" },
+          },
+          data: futureUpdates,
+        });
+      }
     }
 
     return event;
@@ -482,15 +533,24 @@ export class EventsService {
       });
     });
 
-    // §12.6: Fire-and-forget Discord role assignment — RSVP always succeeds regardless.
+    // §12.6: Fire-and-forget Discord role assignment and thread membership — RSVP always succeeds.
     void (async () => {
-      const eventRole = await this.prisma.client.eventRole.findUnique({
-        where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
-      });
-      if (eventRole && !eventRole.deletedAt) {
+      const [eventRole, eventWithThread] = await Promise.all([
+        this.prisma.client.eventRole.findUnique({
+          where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
+        }),
+        this.prisma.client.event.findUnique({
+          where: { id: eventId },
+          select: { discordThreadId: true },
+        }),
+      ]);
+      if (eventRole && eventRole.discordRoleId && !eventRole.deletedAt) {
         await this.discordRole.assignRoleToMember(event.guildId, input.discordUserId, eventRole.discordRoleId);
       }
-    })().catch((err) => this.logger.warn({ err }, "Could not assign event role on RSVP"));
+      if (eventWithThread?.discordThreadId) {
+        await this.discordRole.addMemberToThread(eventWithThread.discordThreadId, input.discordUserId);
+      }
+    })().catch((err) => this.logger.warn({ err }, "Could not assign event role/thread on RSVP"));
 
     return result;
   }
@@ -623,7 +683,7 @@ export class EventsService {
       const eventRole = await this.prisma.client.eventRole.findUnique({
         where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
       });
-      if (eventRole && !eventRole.deletedAt) {
+      if (eventRole && eventRole.discordRoleId && !eventRole.deletedAt) {
         await this.discordRole.removeRoleFromMember(event.guildId, discordUserId, eventRole.discordRoleId);
       }
     })().catch((err) => this.logger.warn({ err }, "Could not remove event role on RSVP cancel"));
@@ -667,10 +727,9 @@ export class EventsService {
       },
     });
     if (existingPlayerRsvp && existingPlayerRsvp.status !== "CANCELLED") {
-      const isActivePlayer =
-        existingPlayerRsvp.signupRole === "PLAYER" ||
-        existingPlayerRsvp.signupRole === "BACKUP_DM";
-      if (isActivePlayer) {
+      // BACKUP_DM may register a table — they are eligible to convert to active DM.
+      // Only a pure PLAYER RSVP (no DM intent) conflicts with TABLE_DM registration.
+      if (existingPlayerRsvp.signupRole === "PLAYER") {
         throw new ForbiddenException(
           "You are already registered as a player for this event. A player cannot also register as a DM.",
         );
@@ -1002,6 +1061,11 @@ export class EventsService {
         });
       });
 
+      // Post table roster to event thread after lock (fire-and-forget).
+      void this.postRosterToThread(eventId, result).catch((err) =>
+        this.logger.warn({ err, eventId }, "Failed to post roster to event thread"),
+      );
+
       return { ok: true, lockedAt, decisions: result.decisions.length, warnings: result.warnings };
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
@@ -1013,6 +1077,54 @@ export class EventsService {
       });
       throw error;
     }
+  }
+
+  // ─── Thread roster post ───────────────────────────────────────────────────
+
+  private async postRosterToThread(eventId: string, result: AssignmentResult): Promise<void> {
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+      select: {
+        title: true,
+        discordThreadId: true,
+        tables: { select: { id: true, title: true, ambassadorProfile: { select: { displayName: true } } } },
+        participants: { select: { id: true, displayName: true } },
+      },
+    });
+    if (!event?.discordThreadId) return;
+
+    const participantById = new Map(event.participants.map((p) => [p.id, p]));
+    const tableById = new Map(event.tables.map((t) => [t.id, t]));
+
+    const seatedByTable = new Map<string, string[]>();
+    const waitlisted: string[] = [];
+
+    for (const decision of result.decisions) {
+      const name = participantById.get(decision.participantId)?.displayName ?? decision.participantId;
+      if (decision.status === "ASSIGNED" && decision.tableId) {
+        const list = seatedByTable.get(decision.tableId) ?? [];
+        list.push(name);
+        seatedByTable.set(decision.tableId, list);
+      } else {
+        waitlisted.push(name);
+      }
+    }
+
+    const lines: string[] = [`**Table Assignments — ${event.title}**\n`];
+    for (const [tableId, names] of seatedByTable) {
+      const table = tableById.get(tableId);
+      const dmLine = table?.ambassadorProfile?.displayName
+        ? ` (DM: ${table.ambassadorProfile.displayName})`
+        : "";
+      lines.push(`**${table?.title ?? tableId}**${dmLine}`);
+      lines.push(names.map((n) => `— ${n}`).join("\n"));
+      lines.push("");
+    }
+    if (waitlisted.length > 0) {
+      lines.push(`**Waitlisted:** ${waitlisted.join(", ")}`);
+    }
+
+    await this.discordRole.postToThread(event.discordThreadId, lines.join("\n"));
   }
 
   // ─── Backup DM lifecycle ──────────────────────────────────────────────────

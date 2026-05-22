@@ -117,6 +117,7 @@ export async function updateEventAction(
         startAt: startAt?.toISOString(),
         endAt: endAt?.toISOString(),
         actorDiscordId: session.discordUserId,
+        applyToFuture: valueOf(formData, "applyToFuture") === "true",
       },
     });
   } catch (error) {
@@ -125,6 +126,64 @@ export async function updateEventAction(
 
   revalidatePath(`/events/${eventId}`);
   return { ok: true, message: "Event updated." };
+}
+
+export async function createSeriesAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const guildId = process.env.DISCORD_GUILD_ID;
+  if (!guildId) return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
+
+  let seriesId = "";
+  try {
+    const defaultChannelId =
+      valueOf(formData, "defaultChannelId") || process.env.DISCORD_EVENT_CHANNEL_ID || "";
+    if (!defaultChannelId)
+      return { ok: false, message: "Set DISCORD_EVENT_CHANNEL_ID or enter a channel ID." };
+
+    const series = await artemisApi<{ id: string }>("/api/v1/series", {
+      method: "POST",
+      body: {
+        guildId,
+        name: valueOf(formData, "name"),
+        defaultChannelId,
+        recurrenceRule: `WEEKLY:${valueOf(formData, "weekday")}`,
+        defaultGameSystem: valueOf(formData, "gameSystem") || "D&D",
+        defaultStartHour: parseInt(valueOf(formData, "startHour") || "18", 10),
+        defaultStartMinute: parseInt(valueOf(formData, "startMinute") || "0", 10),
+        defaultDurationMinutes: parseInt(valueOf(formData, "durationMinutes") || "240", 10),
+        createdByDiscordId: session.discordUserId,
+      },
+    });
+    seriesId = series.id;
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath("/series");
+  redirect(`/series/${seriesId}`);
+}
+
+export async function generateOccurrencesAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const seriesId = valueOf(formData, "seriesId");
+  const count = parseInt(valueOf(formData, "count") || "4", 10);
+
+  try {
+    const result = await artemisApi<{ created: number; events: Array<{ id: string; startAt: string }> }>(
+      `/api/v1/series/${seriesId}/generate`,
+      { method: "POST", body: { count } },
+    );
+    revalidatePath(`/series/${seriesId}`);
+    revalidatePath("/");
+    return { ok: true, message: `Generated ${result.created} event(s).` };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
 }
 
 export async function runAssignmentsAction(
@@ -247,6 +306,26 @@ export async function backupDmActionAction(
     revalidatePath(`/events/${eventId}`);
     const labels = { pull: "pulled to DM", release: "released", decline: "marked declined" };
     return { ok: true, message: `Backup DM ${labels[action] ?? action}.` };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
+export async function retryEventRoleAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const eventId = valueOf(formData, "eventId");
+  try {
+    const result = await artemisApi<{ ok: boolean; discordRoleId?: string; error?: string }>(
+      `/api/v1/events/${eventId}/roles/retry`,
+      { method: "POST" },
+    );
+    revalidatePath(`/events/${eventId}`);
+    if (result.ok) {
+      return { ok: true, message: `Discord role created: ${result.discordRoleId}` };
+    }
+    return { ok: false, message: result.error ?? "Role creation failed." };
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) };
   }

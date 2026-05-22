@@ -16,6 +16,7 @@ export function EditEventForm({
   defaultImageUrl,
   defaultDescription,
   defaultTimezone,
+  seriesId,
 }: {
   eventId: string;
   defaultTitle: string;
@@ -26,6 +27,7 @@ export function EditEventForm({
   defaultImageUrl?: string;
   defaultDescription?: string;
   defaultTimezone?: string;
+  seriesId?: string | null;
 }) {
   const [state, formAction, pending] = useActionState(
     updateEventAction,
@@ -103,6 +105,19 @@ export function EditEventForm({
             defaultValue={defaultDescription ?? ""}
           />
         </label>
+        {seriesId ? (
+          <fieldset className="span-all" style={{ border: "1px solid var(--border, #333)", borderRadius: "4px", padding: "0.75rem" }}>
+            <legend style={{ padding: "0 0.25rem", fontSize: "0.85rem" }}>Apply changes to</legend>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem", fontWeight: "normal" }}>
+              <input type="radio" name="applyToFuture" value="false" defaultChecked />
+              This event only
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: "normal" }}>
+              <input type="radio" name="applyToFuture" value="true" />
+              This and all future events in the series
+            </label>
+          </fieldset>
+        ) : null}
         <div className="form-actions span-all">
           <button className="button" type="submit" disabled={pending}>
             <Save size={16} />

@@ -455,30 +455,68 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   }
 
   if (action === "guest") {
-    // §8.1: Guest selection uses a guild member picker, not a free-text field.
+    // Two-path guest flow: Discord member picker OR text name entry for non-Discord guests.
+    // API enforces the real per-RSVP guest limit; UI cap is permissive.
     const menu = new UserSelectMenuBuilder()
       .setCustomId(`guest-select:${eventId}:${interaction.message.id}`)
-      .setPlaceholder("Select guild members to add as guests (up to 3)")
+      .setPlaceholder("Select guild members to add as guests")
       .setMinValues(0)
-      .setMaxValues(3);
+      .setMaxValues(10);
+    const nameBtn = new ButtonBuilder()
+      .setCustomId(`guest_text:${eventId}`)
+      .setLabel("Add guest by name (non-Discord)")
+      .setStyle(ButtonStyle.Secondary);
     await interaction.reply({
-      content: "Select up to 3 guild members to bring as guests. Your RSVP must already be confirmed.",
-      components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(menu)],
+      content:
+        "Add guests: pick Discord members below, or use the button to enter names for guests who are not in this server.",
+      components: [
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(menu),
+        new ActionRowBuilder<ButtonBuilder>().addComponents(nameBtn),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  // §7.5: Player preferences — avoid DM seating assignment (rules.md §7.5).
+  if (action === "guest_text") {
+    const modal = new ModalBuilder()
+      .setCustomId(`guest-name-modal:${eventId}`)
+      .setTitle("Add Guests by Name");
+    modal.addComponents(
+      new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("guestNames")
+          .setLabel("Guest names (one per line, up to 10)")
+          .setStyle(TextInputStyle.Paragraph)
+          .setPlaceholder("Jane Doe\nJohn Smith")
+          .setRequired(true)
+          .setMaxLength(500),
+      ),
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  // §7.5: Player seating preferences — sit with or avoid specific players.
   if (action === "prefs") {
-    const menu = new UserSelectMenuBuilder()
-      .setCustomId(`pref-avoid-dm:${eventId}`)
-      .setPlaceholder("Select DMs to avoid (up to 3)")
+    const preferMenu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-prefer-player:${eventId}`)
+      .setPlaceholder("Players I'd like to sit with")
       .setMinValues(0)
-      .setMaxValues(3);
+      .setMaxValues(5);
+    const avoidMenu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-avoid-player:${eventId}`)
+      .setPlaceholder("Players I'd prefer to avoid sitting with")
+      .setMinValues(0)
+      .setMaxValues(5);
     await interaction.reply({
-      content: "Select up to 3 DMs to avoid. Assignments will try to seat you at a different table if possible.",
-      components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(menu)],
+      content:
+        "**Seating preferences** — these are soft hints, not guarantees.\n" +
+        "Use the first selector for players you'd like to sit with, the second for players you'd prefer to avoid.",
+      components: [
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidMenu),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -692,8 +730,9 @@ async function handleUserSelectMenu(interaction: Interaction) {
     return;
   }
 
-  if (parts[0] === "pref-avoid-dm") {
+  if (parts[0] === "pref-prefer-player" || parts[0] === "pref-avoid-player") {
     const eventId = parts[1];
+    const preferenceType = parts[0] === "pref-prefer-player" ? "PREFER_PLAYER" : "AVOID_PLAYER";
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const selected = [...interaction.users.keys()];
     if (selected.length === 0) {
@@ -704,14 +743,15 @@ async function handleUserSelectMenu(interaction: Interaction) {
       selected.map((targetUserId) =>
         api.setPreference(eventId, {
           userId: interaction.user.id,
-          preferenceType: "AVOID_DM",
+          preferenceType,
           targetUserId,
           strength: "SOFT",
         }),
       ),
     );
+    const label = preferenceType === "PREFER_PLAYER" ? "sit-with" : "avoid";
     await interaction.editReply({
-      content: `Avoid-DM preference saved for ${selected.length} DM(s). Assignments will try to seat you at a different table if possible.`,
+      content: `Seating preference (${label}) saved for ${selected.length} player(s).`,
     });
     return;
   }
@@ -720,6 +760,27 @@ async function handleUserSelectMenu(interaction: Interaction) {
 async function handleModal(interaction: Interaction & { customId: string }) {
   if (!interaction.isModalSubmit()) return;
   const [action, eventId] = interaction.customId.split(":");
+
+  if (action === "guest-name-modal") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const namesRaw = interaction.fields.getTextInputValue("guestNames");
+    const guests = namesRaw
+      .split("\n")
+      .map((n) => n.trim())
+      .filter(Boolean)
+      .slice(0, 10)
+      .map((displayName) => ({ displayName }));
+    if (guests.length === 0) {
+      await interaction.editReply({ content: "No guest names entered." });
+      return;
+    }
+    await api.updateGuests(eventId, interaction.user.id, guests);
+    await interaction.editReply({
+      content: `${guests.length} guest(s) added: ${guests.map((g) => g.displayName).join(", ")}.`,
+    });
+    await refreshEventMessage(interaction, eventId);
+    return;
+  }
 
   if (action === "dm-modal" || action === "host-modal") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

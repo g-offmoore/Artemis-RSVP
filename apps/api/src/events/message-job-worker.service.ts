@@ -74,6 +74,11 @@ export class MessageJobWorkerService implements OnModuleInit {
     await this.discordRole.processExpiredRoles().catch((err) => {
       this.logger.warn({ err }, "Failed to process expired event roles");
     });
+
+    // Auto-retry transient role/thread creation failures (up to 3 attempts, 15-min backoff).
+    await this.discordRole.retryFailedRolesAndThreads().catch((err) => {
+      this.logger.warn({ err }, "Failed during auto-retry of event roles/threads");
+    });
   }
 
   private async dispatchJob(
@@ -96,6 +101,10 @@ export class MessageJobWorkerService implements OnModuleInit {
       case "ASSIGNMENT_LOCK":
         // P0: run and lock final assignments T-1h before event start (rules.md §11.1).
         await this.runAssignmentLock(job);
+        break;
+      case "BACKUP_DM_FOLLOW_UP":
+        // Fires 1h after the T-3h backup DM ask; notifies organizer if no one accepted.
+        await this.sendBackupDmFollowUp(job, token);
         break;
       default:
         this.logger.warn(`Unknown messageType ${job.messageType} for job ${job.id}`);
@@ -253,6 +262,7 @@ export class MessageJobWorkerService implements OnModuleInit {
       },
     });
     if (!event) throw new Error(`Event ${job.eventId} not found for backup DM ask job ${job.id}`);
+    const eventCreatorId: string = event.createdByDiscordId;
 
     // Identify tracks that have waitlisted players but no DM table.
     const tablesByTrack = new Set(event.tables.map((t) => t.tableType));
@@ -276,8 +286,9 @@ export class MessageJobWorkerService implements OnModuleInit {
       return;
     }
 
-    // Build a sorted candidate list with burnout data.
-    const guildId = (event as any).guildId as string;
+    // Candidates in RSVP signup order — do NOT rank by history or burnout.
+    // Eligibility is determined only by organizer-configured role gates; historical
+    // DM data is display-only context for organizers, not an automated scoring input.
     const candidateUserIds = event.rsvps.flatMap((r) =>
       r.participants.map((p) => ({ discordUserId: r.primaryDiscordUserId, participantId: p.id })),
     );
@@ -287,54 +298,107 @@ export class MessageJobWorkerService implements OnModuleInit {
       return;
     }
 
-    const ambassadors = await this.prisma.client.ambassadorProfile.findMany({
-      where: { guildId, discordUserId: { in: candidateUserIds.map((c) => c.discordUserId) } },
-    });
-    const ambassadorByUser = new Map(ambassadors.map((a) => [a.discordUserId, a]));
-
-    const sorted = [...candidateUserIds].sort((a, b) => {
-      const aa = ambassadorByUser.get(a.discordUserId);
-      const ba = ambassadorByUser.get(b.discordUserId);
-      const aDate = aa?.lastDmDate?.getTime() ?? 0;
-      const bDate = ba?.lastDmDate?.getTime() ?? 0;
-      if (aDate !== bDate) return aDate - bDate;
-      return (aa?.dmCountLast30Days ?? 0) - (ba?.dmCountLast30Days ?? 0);
-    });
-
     const startTs = discordTs(event.startAt, "F");
     const shortageDesc = shortages.map(([track, count]) => `${track} (${count} waitlisted)`).join(", ");
 
-    // Ask the top candidate.
-    const top = sorted[0];
-    const content =
-      `📋 **Backup DM request — ${(event as any).title}**\n\n` +
-      `Your help is needed to cover a DM shortage for **${shortageDesc}**.\n` +
-      `Event time: ${startTs}\n\n` +
-      `**If you accept, you will be moved from player to DM and your player seat will be released.**\n` +
-      `Use the buttons below to respond.`;
+    // Ask all available candidates simultaneously so no candidate is skipped due to ranking.
+    await Promise.all(
+      candidateUserIds.map(async (candidate) => {
+        const content =
+          `📋 **Backup DM request — ${(event as any).title}**\n\n` +
+          `Your help is needed to cover a DM shortage for **${shortageDesc}**.\n` +
+          `Event time: ${startTs}\n\n` +
+          `**If you accept, you will be moved from player to DM and your player seat will be released.**\n` +
+          `Use the buttons below to respond.`;
 
-    const components = [
-      {
-        type: 1,
-        components: [
+        const components = [
           {
-            type: 2,
-            style: 3,
-            label: "Accept DM Assignment",
-            custom_id: backupDmCustomId("accept", job.eventId, top.participantId),
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 3,
+                label: "Accept DM Assignment",
+                custom_id: backupDmCustomId("accept", job.eventId, candidate.participantId),
+              },
+              {
+                type: 2,
+                style: 4,
+                label: "Decline, Keep Player RSVP",
+                custom_id: backupDmCustomId("decline", job.eventId, candidate.participantId),
+              },
+            ],
           },
-          {
-            type: 2,
-            style: 4,
-            label: "Decline, Keep Player RSVP",
-            custom_id: backupDmCustomId("decline", job.eventId, top.participantId),
+        ];
+
+        await discordDmPost(token, candidate.discordUserId, { content, components });
+        this.logger.log(`Sent backup DM ask to ${candidate.discordUserId} for event ${job.eventId}`);
+      }),
+    );
+
+    // Schedule a follow-up 1 hour later to notify the organizer if no one accepted.
+    const followUpAt = new Date(Date.now() + 60 * 60 * 1000);
+    await this.messageJobs.scheduleJob({
+      eventId: job.eventId,
+      messageType: "BACKUP_DM_FOLLOW_UP",
+      targetType: "USER",
+      targetId: eventCreatorId,
+      scheduledFor: followUpAt,
+    });
+  }
+
+  // ─── BACKUP_DM_FOLLOW_UP (T-2h: notify organizer if no one accepted) ─────
+
+  private async sendBackupDmFollowUp(
+    job: { id: string; eventId: string; targetId: string },
+    token: string,
+  ) {
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: job.eventId },
+      include: {
+        participants: {
+          where: { signupRole: "BACKUP_DM", backupDmStatus: "BACKUP_PULLED_TO_DM" },
+        },
+        rsvps: {
+          where: { signupRole: "BACKUP_DM", status: "GOING" },
+          include: {
+            participants: {
+              where: { backupDmStatus: { not: "BACKUP_PULLED_TO_DM" } },
+            },
           },
-        ],
+        },
       },
-    ];
+    });
+    if (!event) {
+      this.logger.warn(`Event ${job.eventId} not found for backup DM follow-up job ${job.id}`);
+      return;
+    }
 
-    await discordDmPost(token, top.discordUserId, { content, components });
-    this.logger.log(`Sent backup DM ask to ${top.discordUserId} for event ${job.eventId}`);
+    // If someone already accepted, no action needed.
+    if ((event.participants as Array<{ backupDmStatus: string }>).length > 0) {
+      this.logger.log(`Event ${job.eventId}: backup DM accepted, skipping follow-up`);
+      return;
+    }
+
+    const startTs = discordTs(event.startAt, "F");
+    const allDeclined = (event.rsvps as Array<{ participants: unknown[] }>).every(
+      (r) => r.participants.length === 0,
+    );
+
+    const content = allDeclined
+      ? `⚠️ **No backup DMs available — ${event.title}**\n\n` +
+        `All backup DM candidates declined the promotion request.\n` +
+        `Event time: ${startTs}\n\n` +
+        `No additional DM capacity will be available unless you manually assign a DM or add a new table.\n` +
+        `_This message is private to you as the event organizer._`
+      : `⏰ **Backup DM follow-up — ${event.title}**\n\n` +
+        `No backup DM has accepted the promotion request yet.\n` +
+        `Event time: ${startTs}\n\n` +
+        `Candidates have not yet responded. You may want to follow up or assign a DM manually.\n` +
+        `_This message is private to you as the event organizer._`;
+
+    await discordDmPost(token, job.targetId, { content });
+    this.logger.log(`Sent backup DM follow-up to ${job.targetId} for event ${job.eventId}`);
   }
 }
 

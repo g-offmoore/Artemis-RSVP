@@ -97,6 +97,7 @@ export const eventCreateSchema = z.object({
   signupOpensAt: eventDateSchema.optional(),
   signupClosesAt: eventDateSchema.optional(),
   createdByDiscordId: z.string().min(1),
+  seriesId: z.string().optional(),
 });
 export type EventCreateInput = z.infer<typeof eventCreateSchema>;
 
@@ -271,8 +272,118 @@ export const eventUpdateSchema = z.object({
   startAt: eventDateSchema.optional(),
   endAt: eventDateSchema.optional(),
   actorDiscordId: z.string().min(1),
+  applyToFuture: z.boolean().optional(),
 });
 export type EventUpdateInput = z.infer<typeof eventUpdateSchema>;
+
+// ─── Event series schemas ─────────────────────────────────────────────────
+
+const weekdaySchema = z.enum(["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]);
+
+export const eventSeriesCreateSchema = z.object({
+  guildId: z.string().min(1),
+  eventTypeKey: z.string().trim().min(1).default("dnd_session_night"),
+  name: z.string().trim().min(1).max(120),
+  defaultChannelId: z.string().min(1),
+  recurrenceRule: z
+    .string()
+    .regex(/^WEEKLY:(MON|TUE|WED|THU|FRI|SAT|SUN)$/, "Only WEEKLY:<DAY> is supported, e.g. WEEKLY:FRI"),
+  signupOpenHoursBefore: z.number().int().min(1).default(168),
+  signupCloseHoursBefore: z.number().int().min(0).default(1),
+  defaultRoleCleanupDays: z.number().int().min(1).default(7),
+  defaultTitle: z.string().trim().min(1).max(120).optional(),
+  defaultGameSystem: z.string().trim().min(1).default("D&D"),
+  defaultDescription: trimmedOptionalString(2000),
+  defaultImageUrl: optionalImageUrlString,
+  defaultStartHour: z.number().int().min(0).max(23).default(18),
+  defaultStartMinute: z.number().int().min(0).max(59).default(0),
+  defaultDurationMinutes: z.number().int().min(30).max(720).default(240),
+  createdByDiscordId: z.string().min(1),
+});
+export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateSchema>;
+
+export const seriesGenerateSchema = z.object({
+  count: z.coerce.number().int().min(1).max(12).default(4),
+});
+export type SeriesGenerateInput = z.infer<typeof seriesGenerateSchema>;
+
+export const WEEKDAY_TO_JS: Record<string, number> = {
+  SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6,
+};
+
+export function nextWeekdayDate(from: Date, targetDay: number): Date {
+  const date = new Date(from);
+  const current = date.getDay();
+  const daysAhead = ((targetDay - current + 7) % 7) || 7;
+  date.setDate(date.getDate() + daysAhead);
+  return date;
+}
+
+/**
+ * Timezone-aware version of nextWeekdayDate.
+ * Finds the next calendar occurrence of targetDay (0=Sun…6=Sat) after `from`,
+ * computing the current day-of-week in `tz` rather than server-local time.
+ * Uses pure ms arithmetic (avoids setDate() local-time ambiguity near midnight).
+ */
+export function nextWeekdayDateInTimezone(from: Date, targetDay: number, tz: string): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+  }).formatToParts(from);
+  const weekdayName = parts.find((p) => p.type === "weekday")!.value;
+  const JS_DAY: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  const current = JS_DAY[weekdayName] ?? 0;
+  const daysAhead = ((targetDay - current + 7) % 7) || 7;
+  return new Date(from.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Create a Date representing a specific wall-clock time in the given IANA timezone.
+ * DST-safe: uses a two-pass offset correction so spring/fall transitions are handled correctly.
+ *
+ * Example: makeDateInTimezone(2026, 3, 8, 18, 0, "America/New_York") returns the UTC
+ * instant corresponding to 6:00 PM Eastern on March 8, 2026 (which is in EST, UTC-5).
+ */
+export function makeDateInTimezone(
+  year: number,
+  month: number, // 1-based
+  day: number,
+  hour: number,
+  minute: number,
+  tz: string,
+): Date {
+  // Step 1: treat the target local time as UTC to get a rough approximation
+  const approxUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+
+  // Step 2: ask Intl what local time that UTC instant shows in the target timezone
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hourCycle: "h23",
+  });
+  const getPart = (type: string) =>
+    parseInt(fmt.formatToParts(approxUtc).find((p) => p.type === type)!.value, 10);
+
+  const tzYear = getPart("year");
+  const tzMonth = getPart("month");
+  const tzDay = getPart("day");
+  const tzHour = getPart("hour");
+  const tzMinute = getPart("minute");
+
+  // Step 3: compute the difference between what we wanted and what the TZ shows
+  const wantedUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const tzShowsAsUtcMs = Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute, 0);
+  const offsetMs = wantedUtcMs - tzShowsAsUtcMs;
+
+  return new Date(approxUtc.getTime() + offsetMs);
+}
 
 export const rsvpCreateSchema = z.object({
   discordUserId: z.string().min(1),

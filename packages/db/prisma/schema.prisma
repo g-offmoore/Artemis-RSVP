@@ -122,6 +122,7 @@ enum EventMessageType {
   REMINDER
   CUSTOM
   ASSIGNMENT_LOCK
+  BACKUP_DM_FOLLOW_UP
 }
 
 enum MessageTargetType {
@@ -181,7 +182,7 @@ model GuildSettings {
   heroicRoleIds            String[] @default([])
   defaultEventChannelId    String?
   feedbackFormUrl          String?
-  temporaryRoleCleanupDays Int      @default(14)
+  temporaryRoleCleanupDays Int      @default(7)
   attendanceReminderHours  Int[]    @default([24, 48])
   autoCloseAfterHours      Int      @default(72)
   databaseConnectionLimit  Int      @default(25)
@@ -218,10 +219,21 @@ model EventSeries {
   eventType              EventType @relation(fields: [eventTypeId], references: [id])
   name                   String
   defaultChannelId       String
+  // recurrenceRule stores a simple weekly schedule: "WEEKLY:MON", "WEEKLY:FRI", etc.
+  // Only WEEKLY is supported in v1; other frequencies must be labeled unsupported.
   recurrenceRule         String
   signupOpenHoursBefore  Int       @default(168)
   signupCloseHoursBefore Int       @default(1)
-  defaultRoleCleanupDays Int       @default(14)
+  defaultRoleCleanupDays Int       @default(7)
+  // Template fields used when generating occurrences
+  defaultTitle           String    @default("")
+  defaultGameSystem      String    @default("D&D")
+  defaultDescription     String?
+  defaultImageUrl        String?
+  defaultStartHour       Int       @default(18)
+  defaultStartMinute     Int       @default(0)
+  defaultDurationMinutes Int       @default(240)
+  createdByDiscordId     String
   events                 Event[]
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
@@ -248,6 +260,8 @@ model Event {
   signupOpensAt               DateTime?
   signupClosesAt              DateTime?
   roleCleanupAt               DateTime?
+  discordThreadId             String?
+  threadRetryCount            Int                  @default(0)
   feedbackWindowHours         Int                  @default(72)
   assignmentNotifiedAt        DateTime?
   lockedAt                    DateTime?
@@ -471,15 +485,18 @@ model EventRole {
   id            String        @id @default(cuid())
   eventId       String
   event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  discordRoleId String
+  discordRoleId String?       // null = pending creation or failed; set once Discord confirms
   roleType      EventRoleType
   name          String
   createdAt     DateTime      @default(now())
   expiresAt     DateTime
   deletedAt     DateTime?
+  failedAt      DateTime?     // set when Discord role creation failed
+  lastError     String?       // last Discord API error message
+  retryCount    Int           @default(0)   // auto-retry attempts made so far
 
   @@unique([eventId, roleType])
-  @@unique([discordRoleId])
+  @@unique([discordRoleId])   // NULL values are not constrained (PostgreSQL semantics)
 }
 
 model NotificationLog {
