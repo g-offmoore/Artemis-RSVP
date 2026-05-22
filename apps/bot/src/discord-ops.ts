@@ -7,9 +7,12 @@ import {
   Role,
   TextChannel,
 } from "discord.js";
+import type { ArtemisApi } from "./api.js";
 
 export async function runDiscordOpsCheck(
   interaction: ChatInputCommandInteraction,
+  api: ArtemisApi,
+  guildId: string,
 ) {
   const guild = interaction.guild;
   const me = guild?.members.me;
@@ -76,9 +79,40 @@ export async function runDiscordOpsCheck(
     );
   }
 
+  // API checks: assignment lock status and recent job failures (rules.md §18).
+  const nextEvent = await fetchNextEventDetail(api, guildId);
+  if (nextEvent) {
+    const messageJobs: Array<{ messageType: string; status: string }> = nextEvent.messageJobs ?? [];
+    const lockJob = messageJobs.find((j) => j.messageType === "ASSIGNMENT_LOCK");
+    const lockOk = lockJob?.status === "PENDING" || lockJob?.status === "SENT";
+    checks.push(resultLine(
+      `Assignment lock job (${(nextEvent as any).title ?? nextEvent.id})`,
+      Boolean(lockOk),
+      lockOk ? undefined : `status=${lockJob?.status ?? "missing"}`,
+    ));
+    const failedJobs = messageJobs.filter((j) => j.status === "FAILED");
+    checks.push(resultLine(
+      "No failed message jobs for next event",
+      failedJobs.length === 0,
+      failedJobs.length > 0 ? `Failed: ${failedJobs.map((j) => j.messageType).join(", ")}` : undefined,
+    ));
+  } else {
+    checks.push(resultLine("Assignment lock / job status", true, "No upcoming events found"));
+  }
+
   await interaction.editReply({
     content: `Artemis Discord ops check:\n${checks.join("\n")}`,
   });
+}
+
+async function fetchNextEventDetail(api: ArtemisApi, guildId: string): Promise<any | null> {
+  try {
+    const events = await api.getEvents(guildId) as any[];
+    if (!Array.isArray(events) || events.length === 0) return null;
+    return api.getEvent(events[0].id);
+  } catch {
+    return null;
+  }
 }
 
 function resultLine(label: string, ok: boolean, error?: string) {

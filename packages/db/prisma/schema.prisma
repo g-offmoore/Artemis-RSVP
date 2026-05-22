@@ -121,6 +121,7 @@ enum EventMessageType {
   POST_EVENT
   REMINDER
   CUSTOM
+  ASSIGNMENT_LOCK
 }
 
 enum MessageTargetType {

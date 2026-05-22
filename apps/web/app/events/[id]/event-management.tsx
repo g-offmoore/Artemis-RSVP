@@ -90,7 +90,14 @@ export function EventManagement({
             {lockPending ? "Locking…" : isLocked ? "Assignments locked" : "Lock assignments"}
           </button>
         </form>
-        <form action={publishAction}>
+        <form
+          action={publishAction}
+          onSubmit={(e) => {
+            if (messageId && !window.confirm("Refresh the Discord post? The embed will be updated with the latest event data.")) {
+              e.preventDefault();
+            }
+          }}
+        >
           <input type="hidden" name="eventId" value={eventId} />
           <button
             className="button secondary"

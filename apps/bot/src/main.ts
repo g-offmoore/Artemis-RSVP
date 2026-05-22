@@ -16,6 +16,7 @@ import {
   SlashCommandBuilder,
   TextInputBuilder,
   TextInputStyle,
+  UserSelectMenuBuilder,
 } from "discord.js";
 import {
   EventDateTimeInputError,
@@ -97,6 +98,11 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isButton()) {
       await handleButton(interaction);
+      return;
+    }
+
+    if (interaction.isUserSelectMenu()) {
+      await handleUserSelectMenu(interaction);
       return;
     }
 
@@ -267,7 +273,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "ops") {
     const subcommand = interaction.options.getSubcommand();
     if (subcommand === "check") {
-      await runDiscordOpsCheck(interaction);
+      await runDiscordOpsCheck(interaction, api, interaction.guildId ?? config.DISCORD_GUILD_ID);
       return;
     }
     if (subcommand === "settings") {
@@ -319,6 +325,9 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // Defer publicly — the success reply IS the event post in the channel.
+    // Errors must be made ephemeral so failures never appear publicly
+    // (rules.md §12.3, §25: "Event creation failure must be ephemeral/private").
     await interaction.deferReply();
     const image = interaction.options.getAttachment("image");
     const payload = {
@@ -332,12 +341,29 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
       endAt: endAt.toISOString(),
       createdByDiscordId: interaction.user.id,
     };
-    const created = await api.createEvent(payload);
-    const event = await api.getEvent(created.id);
-    await interaction.editReply({
-      embeds: [eventEmbed(event)],
-      components: [eventButtons(event)],
-    });
+    try {
+      const created = await api.createEvent(payload);
+      const event = await api.getEvent(created.id);
+      await interaction.editReply({
+        embeds: [eventEmbed(event)],
+        components: eventButtons(event),
+      });
+    } catch (createError) {
+      // Delete the non-ephemeral deferred reply so the error is not left
+      // visible in the channel, then respond ephemerally to the creator only.
+      await interaction.deleteReply().catch(() => undefined);
+      await interaction
+        .followUp({
+          content: userFacingError(createError),
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => undefined);
+      await sendOpsAlert("Event creation failed", {
+        error: createError instanceof Error ? createError.message : String(createError),
+        userId: interaction.user.id,
+        guildId,
+      });
+    }
     return;
   }
 
@@ -429,20 +455,32 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   }
 
   if (action === "guest") {
-    const modal = new ModalBuilder()
-      .setCustomId(`guest-modal:${eventId}`)
-      .setTitle("Add Guests")
-      .addComponents(
-        new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("guestNames")
-            .setLabel("Guest names after you RSVP")
-            .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder("One name per line, up to 3 guests")
-            .setRequired(false),
-        ),
-      );
-    await interaction.showModal(modal);
+    // §8.1: Guest selection uses a guild member picker, not a free-text field.
+    const menu = new UserSelectMenuBuilder()
+      .setCustomId(`guest-select:${eventId}:${interaction.message.id}`)
+      .setPlaceholder("Select guild members to add as guests (up to 3)")
+      .setMinValues(0)
+      .setMaxValues(3);
+    await interaction.reply({
+      content: "Select up to 3 guild members to bring as guests. Your RSVP must already be confirmed.",
+      components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(menu)],
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // §7.5: Player preferences — avoid DM seating assignment (rules.md §7.5).
+  if (action === "prefs") {
+    const menu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-avoid-dm:${eventId}`)
+      .setPlaceholder("Select DMs to avoid (up to 3)")
+      .setMinValues(0)
+      .setMaxValues(3);
+    await interaction.reply({
+      content: "Select up to 3 DMs to avoid. Assignments will try to seat you at a different table if possible.",
+      components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(menu)],
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
 
@@ -503,6 +541,53 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     );
     modal.addComponents(...components);
     await interaction.showModal(modal);
+    return;
+  }
+
+  // Cancel RSVP (rules.md §7.4: every registered user must have a clear cancel action).
+  if (action === "cancel_rsvp") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      await api.cancelRsvp(eventId, interaction.user.id);
+      await interaction.editReply({
+        content: "Your RSVP has been cancelled. You are no longer registered for this event.",
+      });
+      await refreshEventMessage(interaction, eventId);
+    } catch (cancelError) {
+      const msg = cancelError instanceof ArtemisApiError && cancelError.status === 404
+        ? "You don't have an active RSVP to cancel for this event."
+        : userFacingError(cancelError);
+      await interaction.editReply({ content: msg });
+    }
+    return;
+  }
+
+  // Backup DM signup (rules.md §5.4: Backup DM must be a first-class Discord UI path).
+  if (action === "backup_dm") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const event = await api.getEvent(eventId);
+    const vocabulary = eventVocabulary(event);
+    const displayName =
+      interaction.member && "displayName" in interaction.member
+        ? interaction.member.displayName
+        : interaction.user.username;
+    try {
+      await api.rsvp(eventId, {
+        discordUserId: interaction.user.id,
+        displayName,
+        selectedCategory: vocabulary.usesDndCategories ? "NORMAL" : "MIXED",
+        signupRole: "BACKUP_DM",
+        source: "discord",
+      });
+      await interaction.editReply({
+        content:
+          "Backup DM availability registered. You remain eligible for a player seat. " +
+          "If a DM is needed and you are selected, you will receive a DM asking for your consent.",
+      });
+      await refreshEventMessage(interaction, eventId);
+    } catch (backupErr) {
+      await interaction.editReply({ content: userFacingError(backupErr) });
+    }
     return;
   }
 
@@ -575,29 +660,66 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   }
 }
 
-async function handleModal(interaction: Interaction & { customId: string }) {
-  if (!interaction.isModalSubmit()) return;
-  const [action, eventId] = interaction.customId.split(":");
-  if (action === "guest-modal") {
+async function handleUserSelectMenu(interaction: Interaction) {
+  if (!interaction.isUserSelectMenu()) return;
+  const parts = interaction.customId.split(":");
+
+  if (parts[0] === "guest-select") {
+    const eventId = parts[1];
+    const originalMessageId = parts[2];
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-    const rawNames = interaction.fields.getTextInputValue("guestNames") ?? "";
-    const guests = rawNames
-      .split(/[\n,]+/)
-      .map((name) => name.trim())
-      .filter(Boolean)
-      .slice(0, 3)
-      .map((displayName) => ({ displayName }));
-
+    const guests = [...interaction.users.values()].map((user) => {
+      const member = interaction.members.get(user.id);
+      const displayName =
+        member && "displayName" in member ? (member as any).displayName : user.username;
+      return { discordUserId: user.id, displayName };
+    });
     await api.updateGuests(eventId, interaction.user.id, guests);
     await interaction.editReply({
       content: guests.length
-        ? `Guest list updated. Guests recorded: ${guests.length}.`
+        ? `Guest list updated. ${guests.length} guest(s) recorded.`
         : "Guest list cleared.",
     });
-    await refreshEventMessage(interaction, eventId);
+    if (originalMessageId) {
+      const event = await api.getEvent(eventId);
+      await (interaction.channel as any)?.messages
+        ?.fetch(originalMessageId)
+        .then((msg: any) =>
+          msg?.edit({ embeds: [eventEmbed(event)], components: eventButtons(event) }),
+        )
+        .catch(() => undefined);
+    }
     return;
   }
+
+  if (parts[0] === "pref-avoid-dm") {
+    const eventId = parts[1];
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const selected = [...interaction.users.keys()];
+    if (selected.length === 0) {
+      await interaction.editReply({ content: "No preferences changed." });
+      return;
+    }
+    await Promise.all(
+      selected.map((targetUserId) =>
+        api.setPreference(eventId, {
+          userId: interaction.user.id,
+          preferenceType: "AVOID_DM",
+          targetUserId,
+          strength: "SOFT",
+        }),
+      ),
+    );
+    await interaction.editReply({
+      content: `Avoid-DM preference saved for ${selected.length} DM(s). Assignments will try to seat you at a different table if possible.`,
+    });
+    return;
+  }
+}
+
+async function handleModal(interaction: Interaction & { customId: string }) {
+  if (!interaction.isModalSubmit()) return;
+  const [action, eventId] = interaction.customId.split(":");
 
   if (action === "dm-modal" || action === "host-modal") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -685,9 +807,13 @@ function eventEmbed(event: any) {
   return embed;
 }
 
-function eventButtons(event: any) {
+// Returns two action rows so we can fit Cancel RSVP and Backup DM alongside
+// the existing signup buttons (rules.md §7.4 requires a clear cancel path;
+// §5.4 requires Backup DM as a first-class Discord UI path).
+function eventButtons(event: any): ActionRowBuilder<ButtonBuilder>[] {
   const vocabulary = eventVocabulary(event);
-  const buttons = vocabulary.usesDndCategories
+
+  const row1Buttons = vocabulary.usesDndCategories
     ? [
         new ButtonBuilder()
           .setCustomId(`rsvp:${event.id}:NORMAL`)
@@ -705,7 +831,7 @@ function eventButtons(event: any) {
           .setStyle(ButtonStyle.Success),
       ];
 
-  buttons.push(
+  row1Buttons.push(
     new ButtonBuilder()
       .setCustomId(`guest:${event.id}`)
       .setLabel("Guests")
@@ -720,7 +846,26 @@ function eventButtons(event: any) {
       .setStyle(ButtonStyle.Secondary),
   );
 
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons);
+  // Second row: Backup DM signup, Cancel RSVP, and Preferences (rules.md §5.4, §7.4, §7.5).
+  const row2Buttons = [
+    new ButtonBuilder()
+      .setCustomId(`backup_dm:${event.id}`)
+      .setLabel("Backup DM Signup")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`cancel_rsvp:${event.id}`)
+      .setLabel("Cancel RSVP")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`prefs:${event.id}`)
+      .setLabel("Preferences")
+      .setStyle(ButtonStyle.Secondary),
+  ];
+
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...row1Buttons),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...row2Buttons),
+  ];
 }
 
 async function replySafely(interaction: Interaction, content: string) {
@@ -765,7 +910,7 @@ async function refreshEventMessage(interaction: Interaction, eventId: string) {
       ? (interaction as any).message
       : null;
   await message
-    ?.edit({ embeds: [eventEmbed(event)], components: [eventButtons(event)] })
+    ?.edit({ embeds: [eventEmbed(event)], components: eventButtons(event) })
     .catch((error: unknown) => {
       logger.warn({ error, eventId }, "Could not refresh event message");
     });

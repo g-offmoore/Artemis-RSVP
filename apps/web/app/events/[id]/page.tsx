@@ -159,22 +159,42 @@ export default async function EventPage({
         <thead>
           <tr>
             <th>Table</th>
+            <th>DM / Host</th>
             <th>Type</th>
-            <th>Capacity</th>
+            <th>Capacity (soft/hard)</th>
+            <th>Assigned</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody>
-          {event.tables.map((table) => (
-            <tr key={table.id}>
-              <td>{table.title}</td>
-              <td>{table.tableType}</td>
-              <td>
-                {table.softCap}/{table.hardCap}
-              </td>
-              <td>{table.status}</td>
-            </tr>
-          ))}
+          {event.tables.map((table) => {
+            const assignedCount = event.assignments.filter(
+              (a) =>
+                a.eventTableId === table.id &&
+                (a.status === "CONFIRMED_SEATED" ||
+                  a.status === "PROJECTED_SEATED" ||
+                  a.status === "ASSIGNED"),
+            ).length;
+            return (
+              <tr key={table.id}>
+                <td>{table.title}</td>
+                <td>{table.ambassadorProfile?.displayName ?? "—"}</td>
+                <td>{table.tableType}</td>
+                <td>
+                  {table.softCap}/{table.hardCap}
+                </td>
+                <td>
+                  {assignedCount}/{table.hardCap}
+                  {assignedCount > table.softCap ? (
+                    <span style={{ color: "var(--color-warning, orange)", marginLeft: "0.4rem" }}>
+                      (over soft cap)
+                    </span>
+                  ) : null}
+                </td>
+                <td>{table.status}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 

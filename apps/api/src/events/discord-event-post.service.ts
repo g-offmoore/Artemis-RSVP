@@ -1,10 +1,12 @@
 import {
   BadGatewayException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { DiscordRoleService } from "./discord-role.service.js";
 
 type DiscordEmbed = {
   title: string;
@@ -25,7 +27,12 @@ type DiscordComponent = {
 
 @Injectable()
 export class DiscordEventPostService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(DiscordEventPostService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly discordRole: DiscordRoleService,
+  ) {}
 
   async publishEventPost(eventId: string, actorDiscordId: string) {
     const token = process.env.DISCORD_TOKEN;
@@ -46,7 +53,7 @@ export class DiscordEventPostService {
 
     const payload = {
       embeds: [eventEmbed(event)],
-      components: [eventButtons(event)],
+      components: eventButtons(event),
     };
 
     try {
@@ -91,6 +98,14 @@ export class DiscordEventPostService {
           },
         },
       });
+
+      // §12.6: Create a temporary Discord role for this event after publish (fire-and-forget).
+      void this.discordRole.ensureEventRole({
+        id: event.id,
+        guildId: event.guildId,
+        title: event.title,
+        endAt: event.endAt,
+      }).catch((err) => this.logger.warn({ err, eventId }, "Could not ensure event role after publish"));
 
       return { ok: true, channelId: event.channelId, messageId };
     } catch (error) {
@@ -200,25 +215,37 @@ function eventEmbed(event: {
   return embed;
 }
 
+// Returns two action rows matching the bot's eventButtons layout.
+// Row 1: signup buttons; Row 2: Backup DM signup + Cancel RSVP.
+// (rules.md §5.4, §7.4, §13.2)
 function eventButtons(event: {
   id: string;
   gameSystem: string;
-}): DiscordComponent {
+}): DiscordComponent[] {
   const vocabulary = eventVocabulary(event);
-  const buttons = vocabulary.usesDndCategories
+  const row1 = vocabulary.usesDndCategories
     ? [
         button(`rsvp:${event.id}:NORMAL`, "RSVP Normal", 3),
         button(`rsvp:${event.id}:HEROIC`, "RSVP Heroic", 1),
       ]
     : [button(`rsvp:${event.id}:MIXED`, "RSVP", 3)];
 
-  buttons.push(
+  row1.push(
     button(`guest:${event.id}`, "Guests", 2),
     button(`host:${event.id}`, vocabulary.hostButtonLabel, 2),
     button(`assignment:${event.id}`, "My Assignment", 2),
   );
 
-  return { type: 1, components: buttons };
+  const row2 = [
+    button(`backup_dm:${event.id}`, "Backup DM Signup", 1),
+    button(`cancel_rsvp:${event.id}`, "Cancel RSVP", 4),
+    button(`prefs:${event.id}`, "Preferences", 2),
+  ];
+
+  return [
+    { type: 1, components: row1 },
+    { type: 1, components: row2 },
+  ];
 }
 
 function button(custom_id: string, label: string, style: 1 | 2 | 3 | 4) {

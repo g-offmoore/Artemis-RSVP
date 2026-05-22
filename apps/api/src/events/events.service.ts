@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import {
@@ -22,6 +23,7 @@ import { AlertService } from "../common/alert.service.js";
 import { MetricsService } from "../metrics/metrics.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
+import { DiscordRoleService } from "./discord-role.service.js";
 
 const attendanceInputSchema = z.object({
   actorDiscordId: z.string().min(1),
@@ -60,11 +62,14 @@ type EventForAssignment = Awaited<ReturnType<EventsService["loadEventForAssignme
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly metrics: MetricsService,
     private readonly alerts: AlertService,
     private readonly messageJobs: MessageJobsService,
+    private readonly discordRole: DiscordRoleService,
   ) {}
 
   async list(guildId: string) {
@@ -177,6 +182,7 @@ export class EventsService {
       channelId: event.channelId,
       startAt: event.startAt,
       endAt: event.endAt,
+      createdByDiscordId: event.createdByDiscordId,
     });
 
     return event;
@@ -232,6 +238,7 @@ export class EventsService {
         channelId: event.channelId,
         startAt: event.startAt,
         endAt: event.endAt,
+        createdByDiscordId: existing.createdByDiscordId,
       });
     }
 
@@ -353,7 +360,35 @@ export class EventsService {
       ? input.selectedCategory
       : ("MIXED" as const);
 
-    return this.prisma.client.$transaction(async (tx) => {
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      // Enforce RSVP role exclusivity (rules.md §4.1, §5.3, §7.2):
+      // Active DM/GM and Player/BackupDM registrations are mutually exclusive.
+      const existingRsvp = await tx.rSVP.findUnique({
+        where: {
+          eventId_primaryDiscordUserId: {
+            eventId,
+            primaryDiscordUserId: input.discordUserId,
+          },
+        },
+      });
+      if (existingRsvp && existingRsvp.status !== "CANCELLED") {
+        const incomingIsPlayer = input.signupRole === "PLAYER" || input.signupRole === "BACKUP_DM";
+        const existingIsDm = existingRsvp.signupRole === "TABLE_DM";
+        const incomingIsDm = input.signupRole === "TABLE_DM";
+        const existingIsPlayer = existingRsvp.signupRole === "PLAYER" || existingRsvp.signupRole === "BACKUP_DM";
+
+        if (incomingIsPlayer && existingIsDm) {
+          throw new ForbiddenException(
+            "You are already registered as a DM for this event. A DM cannot also sign up as a player.",
+          );
+        }
+        if (incomingIsDm && existingIsPlayer) {
+          throw new ForbiddenException(
+            "You are already registered as a player for this event. Use the change-role flow to switch to DM.",
+          );
+        }
+      }
+
       const profile = await tx.playerProfile.upsert({
         where: {
           guildId_discordUserId: {
@@ -446,6 +481,18 @@ export class EventsService {
         include: { participants: true },
       });
     });
+
+    // §12.6: Fire-and-forget Discord role assignment — RSVP always succeeds regardless.
+    void (async () => {
+      const eventRole = await this.prisma.client.eventRole.findUnique({
+        where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
+      });
+      if (eventRole && !eventRole.deletedAt) {
+        await this.discordRole.assignRoleToMember(event.guildId, input.discordUserId, eventRole.discordRoleId);
+      }
+    })().catch((err) => this.logger.warn({ err }, "Could not assign event role on RSVP"));
+
+    return result;
   }
 
   async updateGuests(eventId: string, discordUserId: string, raw: unknown) {
@@ -541,7 +588,7 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
 
-    return this.prisma.client.rSVP.update({
+    const rsvp = await this.prisma.client.rSVP.update({
       where: {
         eventId_primaryDiscordUserId: {
           eventId,
@@ -570,6 +617,18 @@ export class EventsService {
         },
       },
     });
+
+    // §12.6: Fire-and-forget Discord role removal — cancel always succeeds regardless.
+    void (async () => {
+      const eventRole = await this.prisma.client.eventRole.findUnique({
+        where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
+      });
+      if (eventRole && !eventRole.deletedAt) {
+        await this.discordRole.removeRoleFromMember(event.guildId, discordUserId, eventRole.discordRoleId);
+      }
+    })().catch((err) => this.logger.warn({ err }, "Could not remove event role on RSVP cancel"));
+
+    return rsvp;
   }
 
   // ─── Tables ───────────────────────────────────────────────────────────────
@@ -595,6 +654,27 @@ export class EventsService {
     const eligibility = checkEligibility(rule, memberRoleIds);
     if (!eligibility.eligible) {
       throw new ForbiddenException(eligibility.reason);
+    }
+
+    // Enforce DM/Player exclusivity (rules.md §4.1, §5.3, §7.2):
+    // A user who already has an active player RSVP cannot register as TABLE_DM.
+    const existingPlayerRsvp = await this.prisma.client.rSVP.findUnique({
+      where: {
+        eventId_primaryDiscordUserId: {
+          eventId,
+          primaryDiscordUserId: input.ambassadorDiscordId,
+        },
+      },
+    });
+    if (existingPlayerRsvp && existingPlayerRsvp.status !== "CANCELLED") {
+      const isActivePlayer =
+        existingPlayerRsvp.signupRole === "PLAYER" ||
+        existingPlayerRsvp.signupRole === "BACKUP_DM";
+      if (isActivePlayer) {
+        throw new ForbiddenException(
+          "You are already registered as a player for this event. A player cannot also register as a DM.",
+        );
+      }
     }
 
     const tableType = usesDndCategories(event.gameSystem)

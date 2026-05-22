@@ -4,6 +4,7 @@ import {
   computePostEventScheduledFor,
   computeReminderScheduledFor,
   computeBackupDmAskScheduledFor,
+  computeAssignmentLockScheduledFor,
 } from "@artemis/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -12,6 +13,8 @@ type EventForMessageJobs = {
   channelId: string;
   startAt: Date;
   endAt: Date;
+  // createdByDiscordId targets the REMINDER DM to the event organizer (rules.md §12.4).
+  createdByDiscordId: string;
 };
 
 @Injectable()
@@ -21,17 +24,24 @@ export class MessageJobsService {
   constructor(private readonly prisma: PrismaService) {}
 
   // Called on event creation. Creates pending pre-event, post-event, T-4h
-  // reminder, and T-3h backup DM ask jobs. Uses upsert so calling twice is
-  // idempotent.
+  // organizer reminder (DM to creator), T-3h backup DM ask, and T-1h
+  // assignment lock jobs. Uses upsert so calling twice is idempotent.
+  //
+  // REMINDER targets the event creator via DM (not the public channel) per
+  // rules.md §4.2, §12.4: organizer warnings must not be posted publicly.
+  //
+  // ASSIGNMENT_LOCK is a P0 requirement per rules.md §11.1: assignment must
+  // run and lock exactly 1 hour before event start.
   async scheduleEventMessages(event: EventForMessageJobs): Promise<void> {
     const preScheduledFor = computePreEventScheduledFor(event.startAt);
     const postScheduledFor = computePostEventScheduledFor(event.endAt);
     const reminderScheduledFor = computeReminderScheduledFor(event.startAt);
     const backupDmAskScheduledFor = computeBackupDmAskScheduledFor(event.startAt);
+    const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt);
 
     const upsertJob = (
-      messageType: "PRE_EVENT" | "POST_EVENT" | "REMINDER" | "CUSTOM",
-      targetType: "CHANNEL",
+      messageType: "PRE_EVENT" | "POST_EVENT" | "REMINDER" | "CUSTOM" | "ASSIGNMENT_LOCK",
+      targetType: "CHANNEL" | "USER",
       targetId: string,
       scheduledFor: Date,
     ) =>
@@ -42,16 +52,20 @@ export class MessageJobsService {
       });
 
     await this.prisma.client.$transaction([
-      upsertJob("PRE_EVENT",  "CHANNEL", event.channelId, preScheduledFor),
-      upsertJob("POST_EVENT", "CHANNEL", event.channelId, postScheduledFor),
-      upsertJob("REMINDER",   "CHANNEL", event.channelId, reminderScheduledFor),
-      upsertJob("CUSTOM",     "CHANNEL", event.channelId, backupDmAskScheduledFor),
+      upsertJob("PRE_EVENT",       "CHANNEL", event.channelId,             preScheduledFor),
+      upsertJob("POST_EVENT",      "CHANNEL", event.channelId,             postScheduledFor),
+      // REMINDER goes to the event creator via DM — not the public channel.
+      upsertJob("REMINDER",        "USER",    event.createdByDiscordId,    reminderScheduledFor),
+      upsertJob("CUSTOM",          "CHANNEL", event.channelId,             backupDmAskScheduledFor),
+      // ASSIGNMENT_LOCK triggers lockAssignments() at T-1h (P0).
+      upsertJob("ASSIGNMENT_LOCK", "CHANNEL", event.channelId,             assignmentLockScheduledFor),
     ]);
 
     this.logger.log(
-      `Scheduled 4 message jobs for event ${event.id}: ` +
-      `reminder=${reminderScheduledFor.toISOString()} ` +
+      `Scheduled 5 message jobs for event ${event.id}: ` +
+      `reminder(DM)=${reminderScheduledFor.toISOString()} ` +
       `backupAsk=${backupDmAskScheduledFor.toISOString()} ` +
+      `assignmentLock=${assignmentLockScheduledFor.toISOString()} ` +
       `pre=${preScheduledFor.toISOString()} ` +
       `post=${postScheduledFor.toISOString()}`,
     );
@@ -64,9 +78,10 @@ export class MessageJobsService {
     const postScheduledFor = computePostEventScheduledFor(event.endAt);
     const reminderScheduledFor = computeReminderScheduledFor(event.startAt);
     const backupDmAskScheduledFor = computeBackupDmAskScheduledFor(event.startAt);
+    const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt);
 
     const updatePending = (
-      messageType: "PRE_EVENT" | "POST_EVENT" | "REMINDER" | "CUSTOM",
+      messageType: "PRE_EVENT" | "POST_EVENT" | "REMINDER" | "CUSTOM" | "ASSIGNMENT_LOCK",
       scheduledFor: Date,
     ) =>
       this.prisma.client.eventMessageJob.updateMany({
@@ -75,10 +90,11 @@ export class MessageJobsService {
       });
 
     await this.prisma.client.$transaction([
-      updatePending("PRE_EVENT",  preScheduledFor),
-      updatePending("POST_EVENT", postScheduledFor),
-      updatePending("REMINDER",   reminderScheduledFor),
-      updatePending("CUSTOM",     backupDmAskScheduledFor),
+      updatePending("PRE_EVENT",       preScheduledFor),
+      updatePending("POST_EVENT",      postScheduledFor),
+      updatePending("REMINDER",        reminderScheduledFor),
+      updatePending("CUSTOM",          backupDmAskScheduledFor),
+      updatePending("ASSIGNMENT_LOCK", assignmentLockScheduledFor),
     ]);
 
     this.logger.log(`Rescheduled PENDING message jobs for event ${event.id}`);

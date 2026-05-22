@@ -749,6 +749,8 @@ export const MESSAGE_JOB_DEFAULTS = {
   postEventOffsetMs: 60 * 60 * 1000,          // 1 hour after endAt
   reminderOffsetMs: 4 * 60 * 60 * 1000,       // 4 hours before startAt — organizer warning
   backupDmAskOffsetMs: 3 * 60 * 60 * 1000,   // 3 hours before startAt — backup DM consent ask
+  // P0: assignment must lock exactly 1 hour before event start (rules.md §11.1).
+  assignmentLockOffsetMs: 60 * 60 * 1000,     // 1 hour before startAt
 } as const;
 
 export function computePreEventScheduledFor(startAt: Date): Date {
@@ -767,6 +769,11 @@ export function computeReminderScheduledFor(startAt: Date): Date {
 // T-3h: checks for DM shortages and sends backup DM consent asks if needed.
 export function computeBackupDmAskScheduledFor(startAt: Date): Date {
   return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.backupDmAskOffsetMs);
+}
+
+// T-1h: final assignment lock — this is a P0 requirement (rules.md §11.1).
+export function computeAssignmentLockScheduledFor(startAt: Date): Date {
+  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.assignmentLockOffsetMs);
 }
 
 // ─── Backup DM Discord button helpers ────────────────────────────────────

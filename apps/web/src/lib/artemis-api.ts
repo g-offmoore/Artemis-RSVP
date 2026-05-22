@@ -68,6 +68,12 @@ export type EventDetail = EventSummary & {
     softCap: number;
     hardCap: number;
     status: string;
+    ambassadorProfile?: {
+      id: string;
+      discordUserId: string;
+      displayName: string;
+    } | null;
+    assignments?: Array<{ status: string }>;
   }>;
   assignments: Array<{
     id: string;

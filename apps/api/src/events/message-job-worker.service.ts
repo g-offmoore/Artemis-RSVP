@@ -3,6 +3,8 @@ import { backupDmCustomId } from "@artemis/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { JobsService } from "../jobs/jobs.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
+import { EventsService } from "./events.service.js";
+import { DiscordRoleService } from "./discord-role.service.js";
 
 const JOB_NAME = "artemis.message-job-poll";
 
@@ -21,6 +23,8 @@ export class MessageJobWorkerService implements OnModuleInit {
     private readonly jobs: JobsService,
     private readonly messageJobs: MessageJobsService,
     private readonly prisma: PrismaService,
+    private readonly events: EventsService,
+    private readonly discordRole: DiscordRoleService,
   ) {}
 
   async onModuleInit() {
@@ -65,6 +69,11 @@ export class MessageJobWorkerService implements OnModuleInit {
     if (processed > 0 || failed > 0) {
       this.logger.log(`Message job poll: processed=${processed} failed=${failed}`);
     }
+
+    // §12.6: Clean up expired Discord event roles on each cron tick.
+    await this.discordRole.processExpiredRoles().catch((err) => {
+      this.logger.warn({ err }, "Failed to process expired event roles");
+    });
   }
 
   private async dispatchJob(
@@ -77,10 +86,16 @@ export class MessageJobWorkerService implements OnModuleInit {
         await this.sendChannelMessage(job, token);
         break;
       case "REMINDER":
+        // Sends organizer warning as a DM to the event creator (not the public
+        // channel) per rules.md §4.2, §12.4: organizer warnings are private.
         await this.sendOrganizerWarning(job, token);
         break;
       case "CUSTOM":
         await this.sendBackupDmAsk(job, token);
+        break;
+      case "ASSIGNMENT_LOCK":
+        // P0: run and lock final assignments T-1h before event start (rules.md §11.1).
+        await this.runAssignmentLock(job);
         break;
       default:
         this.logger.warn(`Unknown messageType ${job.messageType} for job ${job.id}`);
@@ -103,7 +118,11 @@ export class MessageJobWorkerService implements OnModuleInit {
     await discordChannelPost(token, job.targetId, { content });
   }
 
-  // ─── REMINDER (T-4h organizer warning) ───────────────────────────────────
+  // ─── REMINDER (T-4h organizer warning via DM) ────────────────────────────
+  // Sends a private DM to the event creator — NOT to the public channel.
+  // Organizer warnings must never appear in the public player channel
+  // (rules.md §4.2, §12.4).  job.targetId is the creator's Discord user ID
+  // (set by scheduleEventMessages with targetType=USER).
 
   private async sendOrganizerWarning(
     job: { id: string; eventId: string; targetId: string },
@@ -152,8 +171,8 @@ export class MessageJobWorkerService implements OnModuleInit {
     // Backup DM candidates available.
     const backupCount = event.rsvps.length;
 
-    // Lock time based on offset.
-    const lockAt = new Date(event.startAt.getTime() - (event as any).assignmentLockOffsetMinutes * 60_000);
+    // Assignment lock is 1h before start (T-1h = assignmentLockOffsetMs).
+    const lockAt = new Date(event.startAt.getTime() - 60 * 60 * 1000);
     const lockTs = discordTs(lockAt, "R");
 
     const trackLines = (Object.entries(byTrack) as Array<[string, { seated: number; waitlisted: number }]>)
@@ -166,13 +185,41 @@ export class MessageJobWorkerService implements OnModuleInit {
       .join("\n");
 
     const content =
-      `📋 **${event.title}** — organizer warning\n` +
+      `📋 **${event.title}** — organizer warning (T-4h)\n` +
       `Starts ${startTs} (${relTs})\n\n` +
       (trackLines ? `**Seating status:**\n${trackLines}\n\n` : "") +
       `**Backup DMs available:** ${backupCount}\n` +
-      `**Assignment lock:** ${lockTs}`;
+      `**Assignment lock:** ${lockTs}\n\n` +
+      `_This message is private to you as the event organizer._`;
 
-    await discordChannelPost(token, job.targetId, { content });
+    // Send as DM to the event creator (job.targetId is the creator's Discord user ID).
+    await discordDmPost(token, job.targetId, { content });
+    this.logger.log(`Sent organizer warning DM to ${job.targetId} for event ${job.eventId}`);
+  }
+
+  // ─── ASSIGNMENT_LOCK (T-1h: lock final assignments) ───────────────────────
+  // Runs and locks assignments exactly 1 hour before event start.
+  // This is a P0 requirement per rules.md §11.1, §11.2.
+
+  private async runAssignmentLock(
+    job: { id: string; eventId: string },
+  ) {
+    this.logger.log(`Running assignment lock for event ${job.eventId} (scheduled job ${job.id})`);
+    try {
+      await this.events.lockAssignments(job.eventId, {
+        actorDiscordId: "system",
+        reason: "Automatic assignment lock at T-1h",
+      });
+      this.logger.log(`Assignment lock completed for event ${job.eventId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Already-locked events are not failures — idempotency is required.
+      if (msg.includes("already locked")) {
+        this.logger.log(`Assignment already locked for event ${job.eventId}, skipping`);
+        return;
+      }
+      throw err;
+    }
   }
 
   // ─── CUSTOM (T-3h backup DM consent ask) ─────────────────────────────────

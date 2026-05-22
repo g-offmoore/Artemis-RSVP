@@ -41,6 +41,12 @@ export class ArtemisApi {
     });
   }
 
+  async cancelRsvp(eventId: string, discordUserId: string) {
+    return this.request(`/api/v1/events/${eventId}/rsvps/${encodeURIComponent(discordUserId)}`, {
+      method: "DELETE",
+    });
+  }
+
   async updateGuests(
     eventId: string,
     discordUserId: string,
@@ -74,6 +80,16 @@ export class ArtemisApi {
     payload: { actorDiscordId: string; participantId: string; action: "pull" | "release" | "decline"; reason?: string },
   ) {
     return this.request(`/api/v1/events/${eventId}/backup-dm/action`, {
+      method: "POST",
+      body: payload,
+    });
+  }
+
+  async setPreference(
+    eventId: string,
+    payload: { userId: string; preferenceType: string; targetUserId?: string; strength?: string },
+  ) {
+    return this.request(`/api/v1/events/${eventId}/preferences`, {
       method: "POST",
       body: payload,
     });
