@@ -85,7 +85,7 @@ export default async function DashboardPage() {
             <Repeat size={18} />
             <strong>Create recurring series</strong>
           </Link>
-          <Link className="action-card" href="#calendar">
+          <Link className="action-card" href="/calendar">
             <ArrowRight size={18} />
             <strong>Open calendar</strong>
           </Link>
@@ -136,8 +136,8 @@ export default async function DashboardPage() {
               View upcoming schedules and fill in event coverage gaps.
             </p>
           </div>
-          <Link className="button secondary" href="#upcoming-events">
-            View event list
+          <Link className="button secondary" href="/calendar">
+            Open full calendar
           </Link>
         </div>
       </section>
