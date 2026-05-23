@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { CalendarRange } from "lucide-react";
 import { ActionState, createSeriesAction } from "../../actions";
 
@@ -18,10 +18,30 @@ const WEEKDAYS = [
 
 export function SeriesCreateForm({
   defaultChannelId,
+  defaultTimezone,
 }: {
   defaultChannelId?: string;
+  defaultTimezone?: string;
 }) {
-  const [state, formAction, pending] = useActionState(createSeriesAction, initialState);
+  const [state, formAction, pending] = useActionState(
+    createSeriesAction,
+    initialState,
+  );
+  const [weekday, setWeekday] = useState("FRI");
+  const [startHour, setStartHour] = useState(18);
+  const [startMinute, setStartMinute] = useState(0);
+  const [durationMinutes, setDurationMinutes] = useState(240);
+
+  const recurrenceSummary = useMemo(() => {
+    const dayLabel =
+      WEEKDAYS.find((d) => d.value === weekday)?.label ?? weekday;
+    const hours = Math.floor(durationMinutes / 60);
+    const minutes = durationMinutes % 60;
+    const formattedHour = startHour % 12 === 0 ? 12 : startHour % 12;
+    const ampm = startHour < 12 ? "AM" : "PM";
+    const durationLabel = `${hours}h${minutes ? ` ${minutes}m` : ""}`;
+    return `Every ${dayLabel} at ${formattedHour}:${String(startMinute).padStart(2, "0")} ${ampm} for ${durationLabel}`;
+  }, [durationMinutes, startHour, startMinute, weekday]);
 
   return (
     <section className="section-panel" aria-labelledby="create-series-heading">
@@ -29,7 +49,8 @@ export function SeriesCreateForm({
         <div>
           <h2 id="create-series-heading">Create Weekly Series</h2>
           <p className="muted">
-            Define a template for recurring events. Generate occurrences after creation.
+            Define a template for recurring events. Generate occurrences after
+            creation.
           </p>
         </div>
       </div>
@@ -54,7 +75,11 @@ export function SeriesCreateForm({
         </label>
         <label>
           Recurring weekday
-          <select name="weekday" defaultValue="FRI">
+          <select
+            name="weekday"
+            value={weekday}
+            onChange={(event) => setWeekday(event.target.value)}
+          >
             {WEEKDAYS.map((d) => (
               <option key={d.value} value={d.value}>
                 {d.label}
@@ -63,12 +88,33 @@ export function SeriesCreateForm({
           </select>
         </label>
         <label>
-          Start hour (0–23)
-          <input name="startHour" type="number" min={0} max={23} defaultValue={18} required />
+          Timezone
+          <input
+            name="timezone"
+            defaultValue={defaultTimezone ?? "America/New_York"}
+            required
+            placeholder="America/New_York"
+          />
         </label>
         <label>
-          Start minute
-          <select name="startMinute" defaultValue="0">
+          Default start hour (0–23)
+          <input
+            name="startHour"
+            type="number"
+            min={0}
+            max={23}
+            value={startHour}
+            onChange={(event) => setStartHour(Number(event.target.value))}
+            required
+          />
+        </label>
+        <label>
+          Default start minute
+          <select
+            name="startMinute"
+            value={String(startMinute)}
+            onChange={(event) => setStartMinute(Number(event.target.value))}
+          >
             <option value="0">:00</option>
             <option value="15">:15</option>
             <option value="30">:30</option>
@@ -76,17 +122,29 @@ export function SeriesCreateForm({
           </select>
         </label>
         <label>
-          Duration (minutes)
-          <input name="durationMinutes" type="number" min={30} max={720} defaultValue={240} required />
+          Default duration (minutes)
+          <input
+            name="durationMinutes"
+            type="number"
+            min={30}
+            max={720}
+            value={durationMinutes}
+            onChange={(event) => setDurationMinutes(Number(event.target.value))}
+            required
+          />
         </label>
         <label>
-          Discord channel ID
+          Default channel
           <input
             name="defaultChannelId"
             defaultValue={defaultChannelId}
             required={!defaultChannelId}
             placeholder={defaultChannelId ? undefined : "Required"}
           />
+        </label>
+        <label>
+          Recurrence rule summary preview
+          <input readOnly value={recurrenceSummary} aria-readonly="true" />
         </label>
         <div className="form-actions span-all">
           <button className="button" type="submit" disabled={pending}>

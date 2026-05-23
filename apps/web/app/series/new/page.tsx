@@ -6,7 +6,9 @@ const guildId = process.env.DISCORD_GUILD_ID;
 
 export default async function NewSeriesPage() {
   const settings = guildId
-    ? await artemisApi<GuildSettings>(`/api/v1/guild-settings?guildId=${guildId}`).catch(() => null)
+    ? await artemisApi<GuildSettings>(
+        `/api/v1/guild-settings?guildId=${guildId}`,
+      ).catch(() => null)
     : null;
 
   return (
@@ -22,7 +24,11 @@ export default async function NewSeriesPage() {
 
       <SeriesCreateForm
         defaultChannelId={
-          settings?.defaultEventChannelId ?? process.env.DISCORD_EVENT_CHANNEL_ID
+          settings?.defaultEventChannelId ??
+          process.env.DISCORD_EVENT_CHANNEL_ID
+        }
+        defaultTimezone={
+          settings?.defaultTimezone ?? process.env.ARTEMIS_EVENT_TIME_ZONE
         }
       />
     </>
