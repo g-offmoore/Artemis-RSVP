@@ -75,6 +75,12 @@ export default async function EventPage({
             <span>/</span>
             <Link href="/#upcoming-events">Events</Link>
             <span>/</span>
+            {event.seriesId ? (
+              <Link href={`/series/${event.seriesId}`}>Series</Link>
+            ) : (
+              <span>Events</span>
+            )}
+            <span>/</span>
             <span>{event.title}</span>
           </nav>
           <h1>{event.title}</h1>

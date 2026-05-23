@@ -1,13 +1,22 @@
 import Link from "next/link";
 import { CalendarRange } from "lucide-react";
-import { artemisApi, EventSeriesDetail, GuildSettings } from "../../../src/lib/artemis-api";
+import {
+  artemisApi,
+  EventSeriesDetail,
+  GuildSettings,
+} from "../../../src/lib/artemis-api";
 import { GenerateOccurrencesForm } from "./generate-form";
 
 const guildId = process.env.DISCORD_GUILD_ID;
 
 const WEEKDAY_LABELS: Record<string, string> = {
-  MON: "Monday", TUE: "Tuesday", WED: "Wednesday", THU: "Thursday",
-  FRI: "Friday", SAT: "Saturday", SUN: "Sunday",
+  MON: "Monday",
+  TUE: "Tuesday",
+  WED: "Wednesday",
+  THU: "Thursday",
+  FRI: "Friday",
+  SAT: "Saturday",
+  SUN: "Sunday",
 };
 
 function recurrenceLabel(rule: string) {
@@ -30,15 +39,22 @@ export default async function SeriesDetailPage({
   const [series, settings] = await Promise.all([
     artemisApi<EventSeriesDetail>(`/api/v1/series/${id}`),
     guildId
-      ? artemisApi<GuildSettings>(`/api/v1/guild-settings?guildId=${guildId}`).catch(() => null)
+      ? artemisApi<GuildSettings>(
+          `/api/v1/guild-settings?guildId=${guildId}`,
+        ).catch(() => null)
       : Promise.resolve(null),
   ]);
 
   const eventTimeZone =
-    settings?.defaultTimezone ?? process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
+    settings?.defaultTimezone ??
+    process.env.ARTEMIS_EVENT_TIME_ZONE ??
+    "America/New_York";
 
   const upcomingEvents = series.events.filter(
     (e) => e.status !== "CANCELLED" && e.status !== "ARCHIVED",
+  );
+  const timelineEvents = [...series.events].sort(
+    (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime(),
   );
 
   return (
@@ -49,13 +65,17 @@ export default async function SeriesDetailPage({
             Back to series
           </Link>
           <h1>
-            <CalendarRange size={20} style={{ verticalAlign: "middle", marginRight: "0.5rem" }} />
+            <CalendarRange
+              size={20}
+              style={{ verticalAlign: "middle", marginRight: "0.5rem" }}
+            />
             {series.name}
           </h1>
           <p className="muted">
             {recurrenceLabel(series.recurrenceRule)} &mdash;{" "}
             {formatHour(series.defaultStartHour, series.defaultStartMinute)},{" "}
-            {series.defaultDurationMinutes / 60}h &mdash; {series.defaultGameSystem}
+            {series.defaultDurationMinutes / 60}h &mdash;{" "}
+            {series.defaultGameSystem}
           </p>
         </div>
       </section>
@@ -76,8 +96,9 @@ export default async function SeriesDetailPage({
           <div>
             <h2 id="generate-heading">Generate Occurrences</h2>
             <p className="muted">
-              Creates the next N weekly events starting after the last generated occurrence.
-              Each generated event uses the series defaults and can be individually edited.
+              Creates the next N weekly events starting after the last generated
+              occurrence. Each generated event uses the series defaults and can
+              be individually edited.
             </p>
           </div>
         </div>
@@ -117,6 +138,56 @@ export default async function SeriesDetailPage({
           </tbody>
         </table>
       )}
+
+      <section
+        className="section-panel"
+        aria-labelledby="series-timeline-heading"
+      >
+        <div className="section-heading">
+          <div>
+            <h2 id="series-timeline-heading">Series Timeline</h2>
+            <p className="muted">
+              Generated occurrences in chronological order, including already
+              completed events.
+            </p>
+          </div>
+          <Link className="button secondary" href="/#upcoming-events">
+            Back to upcoming events
+          </Link>
+        </div>
+        {timelineEvents.length === 0 ? (
+          <p className="muted">No events generated for this series yet.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Event</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {timelineEvents.map((event) => (
+                <tr key={event.id}>
+                  <td>
+                    {new Intl.DateTimeFormat("en-US", {
+                      timeZone: eventTimeZone,
+                      dateStyle: "full",
+                      timeStyle: "short",
+                    }).format(new Date(event.startAt))}
+                  </td>
+                  <td>
+                    <Link href={`/events/${event.id}`}>{event.title}</Link>
+                  </td>
+                  <td>
+                    <span className="status">{event.status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </>
   );
 }

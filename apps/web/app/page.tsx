@@ -114,18 +114,42 @@ export default async function DashboardPage() {
           {roleAccessMessage}
         </p>
       </section>
-      <div id="create-event">
-        <EventCreateForm
-          defaultChannelId={
-            settings?.defaultEventChannelId ??
-            process.env.DISCORD_EVENT_CHANNEL_ID
-          }
-          defaultTimezone={
-            settings?.defaultTimezone ??
-            process.env.ARTEMIS_EVENT_TIME_ZONE ??
-            "America/New_York"
-          }
-        />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "1rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <div id="create-event" style={{ flex: 1, minWidth: "18rem" }}>
+          <EventCreateForm
+            defaultChannelId={
+              settings?.defaultEventChannelId ??
+              process.env.DISCORD_EVENT_CHANNEL_ID
+            }
+            defaultTimezone={
+              settings?.defaultTimezone ??
+              process.env.ARTEMIS_EVENT_TIME_ZONE ??
+              "America/New_York"
+            }
+          />
+        </div>
+        <aside
+          className="section-panel"
+          aria-label="Recurring event call to action"
+        >
+          <h3 style={{ marginTop: 0 }}>Need a recurring event?</h3>
+          <p className="muted">
+            Build a weekly series template and generate the next occurrences in
+            one click.
+          </p>
+          <Link className="button secondary" href="/series/new">
+            <Repeat size={16} />
+            Recurring event
+          </Link>
+        </aside>
       </div>
 
       <section id="calendar" className="section-panel">
