@@ -21,16 +21,31 @@ export default async function AmbassadorsPage() {
 
   return (
     <>
+      <nav className="breadcrumbs" aria-label="Breadcrumb">
+        <Link href="/">Dashboard</Link>
+        <span>/</span>
+        <span>Ambassadors</span>
+      </nav>
       <section className="page-title">
         <div>
           <h1>Ambassadors / DMs</h1>
-          <p className="muted">
-            {roleAccessMessage}
-          </p>
+          <p className="muted">{roleAccessMessage}</p>
         </div>
       </section>
 
       <h2>Active ({active.length})</h2>
+      {active.length === 0 && (
+        <section className="empty-state-card">
+          <h3>No active ambassadors yet</h3>
+          <p className="muted">
+            Add ambassador/DM profiles so event tables can be staffed
+            immediately.
+          </p>
+          <a className="button" href="#register-ambassador">
+            Register ambassador
+          </a>
+        </section>
+      )}
       <table className="table">
         <thead>
           <tr>
@@ -49,10 +64,16 @@ export default async function AmbassadorsPage() {
             <tr key={a.id}>
               <td>{a.displayName}</td>
               <td>{a.supportedGameSystems.join(", ") || "—"}</td>
-              <td>{a.defaultSoftCap}/{a.defaultHardCap}</td>
+              <td>
+                {a.defaultSoftCap}/{a.defaultHardCap}
+              </td>
               <td>{a.dmCountLast30Days}</td>
               <td>{a.backupPullCountLast90Days}</td>
-              <td>{a.lastDmDate ? new Date(a.lastDmDate).toLocaleDateString() : "—"}</td>
+              <td>
+                {a.lastDmDate
+                  ? new Date(a.lastDmDate).toLocaleDateString()
+                  : "—"}
+              </td>
               <td>{a._count?.tables ?? "—"}</td>
               <td>
                 <Link href={`/ambassadors/${a.id}`}>Edit</Link>
@@ -61,7 +82,10 @@ export default async function AmbassadorsPage() {
           ))}
           {active.length === 0 && (
             <tr>
-              <td colSpan={8} className="muted">No active ambassadors. Register your first ambassador below so events can assign tables to active DMs.</td>
+              <td colSpan={8} className="muted">
+                No active ambassadors. Register your first ambassador below so
+                events can assign tables to active DMs.
+              </td>
             </tr>
           )}
         </tbody>
@@ -93,7 +117,7 @@ export default async function AmbassadorsPage() {
         </>
       )}
 
-      <h2>Register New Ambassador</h2>
+      <h2 id="register-ambassador">Register New Ambassador</h2>
       <RegisterAmbassadorForm />
     </>
   );
