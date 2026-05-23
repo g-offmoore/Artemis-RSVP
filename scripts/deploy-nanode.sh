@@ -69,10 +69,15 @@ done
 echo "8. Restarting Caddy"
 compose up -d --no-deps caddy
 
-echo "9. Restarting bot last"
+echo "10. Running post-deploy route smoke checks"
+KNOWN_EVENT_ID="${KNOWN_EVENT_ID:?KNOWN_EVENT_ID must be set for smoke checks}" \
+BASE_URL="${BASE_URL:-https://app.artemisrsvp.com}" \
+./scripts/post-deploy-smoke.sh
+
+echo "11. Restarting bot last"
 compose up -d --no-deps bot
 
-echo "10. Verifying bot container state"
+echo "12. Verifying bot container state"
 sleep 10
 compose ps bot
 if ! compose ps bot | grep -q "Up"; then
@@ -80,7 +85,7 @@ if ! compose ps bot | grep -q "Up"; then
   exit 1
 fi
 
-echo "11. Pruning old images after successful deployment"
+echo "13. Pruning old images after successful deployment"
 docker image prune -af --filter "until=168h"
 
 echo "Deployment complete"
