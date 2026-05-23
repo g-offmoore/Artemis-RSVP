@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { artemisApi, EventDetail, GuildSettings, SeatingGroup } from "../../../src/lib/artemis-api";
+import {
+  artemisApi,
+  EventDetail,
+  GuildSettings,
+  SeatingGroup,
+} from "../../../src/lib/artemis-api";
 import { AttendancePanel } from "./attendance-panel";
 import { BackupDmPanel } from "./backup-dm-panel";
 import { EditEventForm } from "./edit-event-form";
@@ -40,17 +45,21 @@ export default async function EventPage({
           `/api/v1/guild-settings?guildId=${guildId}`,
         ).catch(() => null)
       : Promise.resolve(null),
-    artemisApi<EventDetail["messageJobs"]>(`/api/v1/events/${id}/message-jobs`).catch(() => []),
-    artemisApi<Array<{
-      rsvpId: string;
-      discordUserId: string;
-      participantId: string | null;
-      backupDmStatus: string | null;
-      rsvpCreatedAt: string;
-      lastDmDate: string | null;
-      dmCountLast30Days: number;
-      backupPullCountLast90Days: number;
-    }>>(`/api/v1/events/${id}/backup-dm/candidates`).catch(() => []),
+    artemisApi<EventDetail["messageJobs"]>(
+      `/api/v1/events/${id}/message-jobs`,
+    ).catch(() => []),
+    artemisApi<
+      Array<{
+        rsvpId: string;
+        discordUserId: string;
+        participantId: string | null;
+        backupDmStatus: string | null;
+        rsvpCreatedAt: string;
+        lastDmDate: string | null;
+        dmCountLast30Days: number;
+        backupPullCountLast90Days: number;
+      }>
+    >(`/api/v1/events/${id}/backup-dm/candidates`).catch(() => []),
   ]);
   const eventTimeZone =
     settings?.defaultTimezone ??
@@ -61,9 +70,13 @@ export default async function EventPage({
     <>
       <section className="page-title">
         <div>
-          <Link className="muted" href="/">
-            Back to events
-          </Link>
+          <nav className="breadcrumbs" aria-label="Breadcrumb">
+            <Link href="/">Dashboard</Link>
+            <span>/</span>
+            <Link href="/#upcoming-events">Events</Link>
+            <span>/</span>
+            <span>{event.title}</span>
+          </nav>
           <h1>{event.title}</h1>
           <p className="muted">
             {event.gameSystem} &mdash;{" "}
@@ -74,7 +87,8 @@ export default async function EventPage({
             }).format(new Date(event.startAt))}
             {event.seriesId ? (
               <>
-                {" "}&mdash;{" "}
+                {" "}
+                &mdash;{" "}
                 <Link href={`/series/${event.seriesId}`} className="muted">
                   Series &rarr;
                 </Link>
@@ -82,7 +96,14 @@ export default async function EventPage({
             ) : null}
           </p>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.25rem" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: "0.25rem",
+          }}
+        >
           <span className="status">{event.status}</span>
           {event.messageId && guildId ? (
             <a
@@ -199,7 +220,12 @@ export default async function EventPage({
                 <td>
                   {assignedCount}/{table.hardCap}
                   {assignedCount > table.softCap ? (
-                    <span style={{ color: "var(--color-warning, orange)", marginLeft: "0.4rem" }}>
+                    <span
+                      style={{
+                        color: "var(--color-warning, orange)",
+                        marginLeft: "0.4rem",
+                      }}
+                    >
                       (over soft cap)
                     </span>
                   ) : null}
@@ -244,7 +270,9 @@ export default async function EventPage({
             <tbody>
               {(event.seatingGroups as SeatingGroup[]).map((group) => (
                 <tr key={group.id}>
-                  <td className="muted" style={{ fontSize: "0.8rem" }}>{group.id.slice(0, 8)}…</td>
+                  <td className="muted" style={{ fontSize: "0.8rem" }}>
+                    {group.id.slice(0, 8)}…
+                  </td>
                   <td>{group.splitPolicy}</td>
                   <td>
                     {group.members.map((m) => (
@@ -289,7 +317,7 @@ export default async function EventPage({
                     {job.status === "SENT" && job.sentAt
                       ? `Sent ${new Date(job.sentAt).toLocaleString()}`
                       : job.status === "FAILED"
-                        ? job.lastError ?? "Unknown error"
+                        ? (job.lastError ?? "Unknown error")
                         : null}
                   </td>
                 </tr>

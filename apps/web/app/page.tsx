@@ -1,6 +1,17 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, ShieldCheck, UsersRound } from "lucide-react";
-import { artemisApi, EventSummary, GuildSettings } from "../src/lib/artemis-api";
+import {
+  ArrowRight,
+  CalendarDays,
+  Repeat,
+  Settings,
+  ShieldCheck,
+  UsersRound,
+} from "lucide-react";
+import {
+  artemisApi,
+  EventSummary,
+  GuildSettings,
+} from "../src/lib/artemis-api";
 import { allowedRoleAccessMessage } from "../src/lib/auth";
 import { EventCreateForm } from "./event-create-form";
 
@@ -56,13 +67,42 @@ export default async function DashboardPage() {
         </div>
       </section>
 
+      <section className="section-panel" aria-label="Quick actions">
+        <div className="section-heading">
+          <div>
+            <h2>Quick Actions</h2>
+            <p className="muted">
+              Common admin tasks to get your scheduling workflow started.
+            </p>
+          </div>
+        </div>
+        <div className="quick-actions">
+          <Link className="action-card" href="#create-event">
+            <CalendarDays size={18} />
+            <strong>Create one-time event</strong>
+          </Link>
+          <Link className="action-card" href="/series/new">
+            <Repeat size={18} />
+            <strong>Create recurring series</strong>
+          </Link>
+          <Link className="action-card" href="#calendar">
+            <ArrowRight size={18} />
+            <strong>Open calendar</strong>
+          </Link>
+          <Link className="action-card" href="/settings">
+            <Settings size={18} />
+            <strong>Configure default channel/timezone</strong>
+          </Link>
+        </div>
+      </section>
 
       <section className="section-panel" aria-label="Ambassador management">
         <div className="section-heading">
           <div>
             <h2>Ambassador Management</h2>
             <p className="muted">
-              Assign, track, and maintain ambassador profiles used for table planning.
+              Assign, track, and maintain ambassador profiles used for table
+              planning.
             </p>
           </div>
           <Link className="button secondary" href="/ambassadors">
@@ -74,19 +114,52 @@ export default async function DashboardPage() {
           {roleAccessMessage}
         </p>
       </section>
-      <EventCreateForm
-        defaultChannelId={
-          settings?.defaultEventChannelId ??
-          process.env.DISCORD_EVENT_CHANNEL_ID
-        }
-        defaultTimezone={
-          settings?.defaultTimezone ??
-          process.env.ARTEMIS_EVENT_TIME_ZONE ??
-          "America/New_York"
-        }
-      />
+      <div id="create-event">
+        <EventCreateForm
+          defaultChannelId={
+            settings?.defaultEventChannelId ??
+            process.env.DISCORD_EVENT_CHANNEL_ID
+          }
+          defaultTimezone={
+            settings?.defaultTimezone ??
+            process.env.ARTEMIS_EVENT_TIME_ZONE ??
+            "America/New_York"
+          }
+        />
+      </div>
 
-      <h2>Upcoming Events</h2>
+      <section id="calendar" className="section-panel">
+        <div className="section-heading">
+          <div>
+            <h2>Calendar</h2>
+            <p className="muted">
+              View upcoming schedules and fill in event coverage gaps.
+            </p>
+          </div>
+          <Link className="button secondary" href="#upcoming-events">
+            View event list
+          </Link>
+        </div>
+      </section>
+
+      <h2 id="upcoming-events">Upcoming Events</h2>
+      {events.length === 0 && (
+        <section className="empty-state-card">
+          <h3>Get started with event operations</h3>
+          <p className="muted">
+            Use quick actions above to create an event, set up recurring series,
+            and configure defaults.
+          </p>
+          <div className="empty-state-actions">
+            <Link className="button" href="#create-event">
+              Create one-time event
+            </Link>
+            <Link className="button secondary" href="/series/new">
+              Create recurring series
+            </Link>
+          </div>
+        </section>
+      )}
       <table className="table">
         <thead>
           <tr>
@@ -117,7 +190,9 @@ export default async function DashboardPage() {
           {events.length === 0 && (
             <tr>
               <td colSpan={6} className="muted">
-                No events yet. Create your first event above, then use <Link href="/ambassadors">Ambassadors</Link> to register available DMs before table assignments.
+                No events yet. Create your first event above, then use{" "}
+                <Link href="/ambassadors">Ambassadors</Link> to register
+                available DMs before table assignments.
               </td>
             </tr>
           )}
