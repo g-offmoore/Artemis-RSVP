@@ -276,3 +276,10 @@ textarea {
     overflow-x: auto;
   }
 }
+
+.role-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}

@@ -106,10 +106,11 @@ Supported IANA timezone values for US stores:
 
 1. Open the dashboard at your configured `APP_DOMAIN`.
 2. Authenticate with Discord OAuth.
-3. Fill in the Create Event form: event name, game, date (date picker), start time, end time, optional image URL, optional description.
-4. The Discord channel defaults to the value set by `/ops set-event-channel` (or the `DISCORD_EVENT_CHANNEL_ID` env var as a fallback).
-5. Click **Create event**. The API creates the DB record and immediately publishes a Discord embed to the configured channel.
-6. You are redirected to the event detail page. The header shows **Discord post →** linking directly to the message.
+3. To manage DMs/ambassadors, open **Ambassadors** in the top navigation or go directly to `/ambassadors`.
+4. Fill in the Create Event form: event name, game, date (date picker), start time, end time, optional image URL, optional description.
+5. The Discord channel defaults to the value set by `/ops set-event-channel` (or the `DISCORD_EVENT_CHANNEL_ID` env var as a fallback).
+6. Click **Create event**. The API creates the DB record and immediately publishes a Discord embed to the configured channel.
+7. You are redirected to the event detail page. The header shows **Discord post →** linking directly to the message.
 
 ### Creating an Event (Discord slash command)
 

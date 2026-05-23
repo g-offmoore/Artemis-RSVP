@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { artemisApi, AmbassadorProfile } from "../../src/lib/artemis-api";
 import { RegisterAmbassadorForm } from "./register-ambassador-form";
+import { allowedRoleAccessMessage } from "../../src/lib/auth";
 
 const guildId = process.env.DISCORD_GUILD_ID;
 
@@ -8,6 +9,8 @@ export default async function AmbassadorsPage() {
   if (!guildId) {
     return <p className="error">DISCORD_GUILD_ID is not configured.</p>;
   }
+
+  const roleAccessMessage = allowedRoleAccessMessage();
 
   const ambassadors = await artemisApi<AmbassadorProfile[]>(
     `/api/v1/ambassadors?guildId=${guildId}`,
@@ -19,7 +22,12 @@ export default async function AmbassadorsPage() {
   return (
     <>
       <section className="page-title">
-        <h1>Ambassadors / DMs</h1>
+        <div>
+          <h1>Ambassadors / DMs</h1>
+          <p className="muted">
+            {roleAccessMessage}
+          </p>
+        </div>
       </section>
 
       <h2>Active ({active.length})</h2>
@@ -53,7 +61,7 @@ export default async function AmbassadorsPage() {
           ))}
           {active.length === 0 && (
             <tr>
-              <td colSpan={8} className="muted">No active ambassadors.</td>
+              <td colSpan={8} className="muted">No active ambassadors. Register your first ambassador below so events can assign tables to active DMs.</td>
             </tr>
           )}
         </tbody>
