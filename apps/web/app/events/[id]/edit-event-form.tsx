@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import { ActionState, updateEventAction } from "../../actions";
 
@@ -17,6 +17,11 @@ export function EditEventForm({
   defaultDescription,
   defaultTimezone,
   seriesId,
+  defaultChannelId,
+  guildDefaultChannelId,
+  seriesDefaultChannelId,
+  defaultStatus,
+  defaultEventType,
 }: {
   eventId: string;
   defaultTitle: string;
@@ -28,11 +33,19 @@ export function EditEventForm({
   defaultDescription?: string;
   defaultTimezone?: string;
   seriesId?: string | null;
+  defaultChannelId?: string;
+  guildDefaultChannelId?: string;
+  seriesDefaultChannelId?: string;
+  defaultStatus?: string;
+  defaultEventType?: string;
 }) {
   const [state, formAction, pending] = useActionState(
     updateEventAction,
     initialState,
   );
+  const [manualChannelId, setManualChannelId] = useState(defaultChannelId ?? "");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(defaultImageUrl ?? "");
+  const resolvedChannelId = useMemo(() => manualChannelId || seriesDefaultChannelId || guildDefaultChannelId || "", [guildDefaultChannelId, manualChannelId, seriesDefaultChannelId]);
 
   return (
     <details className="section-panel">
@@ -45,6 +58,8 @@ export function EditEventForm({
 
       <form className="form-grid compact" action={formAction}>
         <input type="hidden" name="eventId" value={eventId} />
+        <input type="hidden" name="guildDefaultChannelId" value={guildDefaultChannelId ?? ""} />
+        <input type="hidden" name="seriesDefaultChannelId" value={seriesDefaultChannelId ?? ""} />
         {defaultTimezone ? (
           <input type="hidden" name="timezone" value={defaultTimezone} />
         ) : null}
@@ -57,6 +72,12 @@ export function EditEventForm({
             defaultValue={defaultTitle}
           />
         </label>
+        <label>
+          Timezone
+          <select name="timezone" defaultValue={defaultTimezone ?? "America/New_York"}><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Denver">America/Denver</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="UTC">UTC</option></select>
+        </label>
+        <label>Event type<select name="eventType" defaultValue={defaultEventType ?? "ONE_SHOT"}><option value="ONE_SHOT">One-shot</option><option value="SERIES_OCCURRENCE">Series occurrence</option></select></label>
+        <label>Event status<select name="status" defaultValue={defaultStatus ?? "SCHEDULED"}><option value="DRAFT">Draft</option><option value="SCHEDULED">Scheduled</option><option value="CANCELLED">Cancelled</option></select></label>
         <label>
           Game
           <select name="gameSystem" defaultValue={defaultGameSystem}>
@@ -79,6 +100,11 @@ export function EditEventForm({
           />
         </label>
         <label>
+          Channel ID
+          <input name="channelId" defaultValue={defaultChannelId ?? ""} onChange={(e) => setManualChannelId(e.target.value.trim())} pattern="^\d{17,20}$" title="Discord channel IDs are numeric and usually 17–20 digits." placeholder="123456789012345678" />
+          <small className="muted">Leave empty to inherit series or guild default channel.</small>
+        </label>
+        <label>
           Ends
           <input
             name="endTime"
@@ -94,7 +120,9 @@ export function EditEventForm({
             type="url"
             placeholder="https://example.com/event-poster.png"
             defaultValue={defaultImageUrl ?? ""}
+            onChange={(e) => setImagePreviewUrl(e.target.value.trim())}
           />
+        {imagePreviewUrl ? <img className="event-graphic" src={imagePreviewUrl} alt="Graphic preview" /> : null}
         </label>
         <label className="span-all">
           Description
@@ -123,6 +151,8 @@ export function EditEventForm({
             <Save size={16} />
             {pending ? "Saving" : "Save changes"}
           </button>
+          <p className="muted">Will post to #{resolvedChannelId || "(none)"} / {resolvedChannelId || "no-channel"}</p>
+          <button className="button secondary" type="button" onClick={() => alert(`Preview\nChannel: ${resolvedChannelId || "(none)"}`)}>Test publish preview</button>
           {state.message ? (
             <p className={state.ok ? "form-message ok" : "form-message error"}>
               {state.message}
