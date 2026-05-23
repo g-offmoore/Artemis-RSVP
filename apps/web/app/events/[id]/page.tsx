@@ -192,6 +192,11 @@ export default async function EventPage({
         defaultDescription={event.description}
         defaultTimezone={eventTimeZone}
         seriesId={event.seriesId}
+        defaultChannelId={event.channelId}
+        guildDefaultChannelId={settings?.defaultEventChannelId ?? process.env.DISCORD_EVENT_CHANNEL_ID}
+        seriesDefaultChannelId={undefined}
+        defaultStatus={event.status}
+        defaultEventType={event.seriesId ? "SERIES_OCCURRENCE" : "ONE_SHOT"}
       />
 
       <h2>Tables</h2>

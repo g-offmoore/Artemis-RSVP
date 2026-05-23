@@ -129,6 +129,7 @@ export default async function DashboardPage() {
               settings?.defaultEventChannelId ??
               process.env.DISCORD_EVENT_CHANNEL_ID
             }
+            guildDefaultChannelId={settings?.defaultEventChannelId ?? process.env.DISCORD_EVENT_CHANNEL_ID}
             defaultTimezone={
               settings?.defaultTimezone ??
               process.env.ARTEMIS_EVENT_TIME_ZONE ??
