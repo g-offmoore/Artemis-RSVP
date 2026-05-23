@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CalendarPlus } from "lucide-react";
 import { ActionState, createEventAction } from "./actions";
 
@@ -17,6 +18,8 @@ export function EventCreateForm({
     createEventAction,
     initialState,
   );
+  const searchParams = useSearchParams();
+  const prefilledDate = searchParams.get("createDate") ?? undefined;
 
   return (
     <section className="section-panel" aria-labelledby="create-event-heading">
@@ -52,7 +55,7 @@ export function EventCreateForm({
         </label>
         <label>
           Date
-          <input name="date" type="date" required />
+          <input name="date" type="date" required defaultValue={prefilledDate} />
         </label>
         <label>
           Starts

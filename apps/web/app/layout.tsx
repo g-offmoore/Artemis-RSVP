@@ -17,7 +17,7 @@ export default async function RootLayout({
   const primaryLinks = [
     { href: "/", label: "Dashboard" },
     { href: "/#upcoming-events", label: "Events" },
-    { href: "/#calendar", label: "Calendar" },
+    { href: "/calendar", label: "Calendar" },
     { href: "/series", label: "Series" },
     { href: "/ambassadors", label: "Ambassadors" },
     { href: "/settings", label: "Settings" },
