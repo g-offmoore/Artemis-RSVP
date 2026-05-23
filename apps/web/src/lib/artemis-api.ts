@@ -51,6 +51,8 @@ export type GuildSettings = {
   heroicRoleIds: string[];
   temporaryRoleCleanupDays?: number;
   feedbackFormUrl?: string;
+  updatedAt?: string;
+  updatedByDiscordId?: string;
 };
 
 export type AmbassadorProfile = {

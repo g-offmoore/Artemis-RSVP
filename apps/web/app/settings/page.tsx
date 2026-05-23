@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { artemisApi, GuildSettings } from "../../src/lib/artemis-api";
 import { SettingsForm } from "./settings-form";
+import { requireSession } from "../../src/lib/auth";
 
 const guildId = process.env.DISCORD_GUILD_ID;
 
 export default async function SettingsPage() {
+  const session = await requireSession();
   if (!guildId) {
     return <p className="error">DISCORD_GUILD_ID is not configured.</p>;
   }
@@ -12,6 +14,9 @@ export default async function SettingsPage() {
   const settings = await artemisApi<GuildSettings>(
     `/api/v1/guild-settings?guildId=${guildId}`,
   ).catch(() => null);
+
+  const hasAdminRoles = (settings?.adminRoleIds?.length ?? 0) > 0;
+  const canEdit = !hasAdminRoles || (settings?.adminRoleIds ?? []).some((roleId) => session.roles.includes(roleId));
 
   return (
     <>
@@ -35,7 +40,7 @@ export default async function SettingsPage() {
           </Link>
         </section>
       )}
-      <SettingsForm settings={settings} />
+      <SettingsForm settings={settings} canEdit={canEdit} currentUserId={session.discordUserId} />
     </>
   );
 }
