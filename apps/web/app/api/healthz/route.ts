@@ -9,7 +9,8 @@ const requiredEnv = [
   "DISCORD_REDIRECT_URI",
   "DISCORD_GUILD_ID",
   "DASHBOARD_ALLOWED_ROLE_IDS",
-  "INTERNAL_API_TOKEN"
+  "INTERNAL_API_TOKEN",
+  "WEB_APP_URL"
 ];
 
 export async function GET() {

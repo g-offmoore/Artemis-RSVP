@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     createdAt: Date.now()
   });
 
-  const response = NextResponse.redirect(new URL("/", request.url));
+  const response = NextResponse.redirect(new URL("/", required("WEB_APP_URL")));
   response.cookies.delete("artemis_oauth_state");
   return response;
 }
