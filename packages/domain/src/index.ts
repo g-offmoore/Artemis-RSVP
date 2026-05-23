@@ -826,8 +826,38 @@ export const guildSettingsUpdateSchema = z.object({
   ),
   staffRoleIds: z.array(z.string().min(1)).optional(),
   adminRoleIds: z.array(z.string().min(1)).optional(),
+  ambassadorRoleIds: z.array(z.string().min(1)).optional(),
+  normalRoleIds: z.array(z.string().min(1)).optional(),
+  heroicRoleIds: z.array(z.string().min(1)).optional(),
+  temporaryRoleCleanupDays: z.number().int().min(1).max(90).optional(),
 });
 export type GuildSettingsUpdate = z.infer<typeof guildSettingsUpdateSchema>;
+
+export const ambassadorCreateSchema = z.object({
+  guildId: z.string().min(1),
+  discordUserId: z.string().min(1),
+  displayName: z.string().trim().min(1).max(120),
+  supportedGameSystems: z.array(z.string().min(1)).default(["D&D"]),
+  defaultSoftCap: z.number().int().min(1).max(20).default(6),
+  defaultHardCap: z.number().int().min(2).max(25).default(7),
+  defaultTableType: z.enum(["NORMAL", "HEROIC", "MIXED"]).default("MIXED"),
+  notes: trimmedOptionalString(500),
+});
+export type AmbassadorCreateInput = z.infer<typeof ambassadorCreateSchema>;
+
+export const ambassadorUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(120).optional(),
+  supportedGameSystems: z.array(z.string().min(1)).optional(),
+  defaultSoftCap: z.number().int().min(1).max(20).optional(),
+  defaultHardCap: z.number().int().min(2).max(25).optional(),
+  defaultTableType: z.enum(["NORMAL", "HEROIC", "MIXED"]).optional(),
+  active: z.boolean().optional(),
+  notes: trimmedOptionalString(500),
+  dmCountLast30Days: z.number().int().min(0).optional(),
+  backupPullCountLast90Days: z.number().int().min(0).optional(),
+  lastDmDate: z.string().datetime().nullable().optional(),
+});
+export type AmbassadorUpdateInput = z.infer<typeof ambassadorUpdateSchema>;
 
 export function temporaryRoleName(
   eventTitle: string,

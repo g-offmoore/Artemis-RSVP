@@ -127,6 +127,12 @@ export class EventsController {
     return this.events.checkSignupEligibility(id, body);
   }
 
+  // List eligibility rules for an event.
+  @Get(":id/eligibility/rules")
+  listEligibilityRules(@Param("id") id: string) {
+    return this.events.listEligibilityRules(id);
+  }
+
   // Upsert a role eligibility rule for an event.
   @Post(":id/eligibility/rules")
   upsertEligibilityRule(@Param("id") id: string, @Body() body: unknown) {

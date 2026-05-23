@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { artemisApi, EventDetail, GuildSettings } from "../../../src/lib/artemis-api";
+import { artemisApi, EventDetail, GuildSettings, SeatingGroup } from "../../../src/lib/artemis-api";
+import { AttendancePanel } from "./attendance-panel";
 import { BackupDmPanel } from "./backup-dm-panel";
 import { EditEventForm } from "./edit-event-form";
+import { EligibilityRulesPanel } from "./eligibility-rules-panel";
 import { EventManagement } from "./event-management";
+import { ParticipantsPanel } from "./participants-panel";
 
 const guildId = process.env.DISCORD_GUILD_ID;
 
@@ -208,49 +211,55 @@ export default async function EventPage({
         </tbody>
       </table>
 
-      <h2>Participants</h2>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Category</th>
-            <th>Role</th>
-            <th>Attendance</th>
-            <th>Assignment</th>
-          </tr>
-        </thead>
-        <tbody>
-          {event.participants.map((participant) => {
-            const seatedStatuses = [
-              "ASSIGNED",
-              "PROJECTED_SEATED",
-              "CONFIRMED_SEATED",
-            ];
-            const assignment = event.assignments.find(
-              (item) =>
-                item.eventParticipantId === participant.id &&
-                seatedStatuses.includes(item.status),
-            );
-            const table = event.tables.find(
-              (item) => item.id === assignment?.eventTableId,
-            );
-            const assignmentLabel = assignment
-              ? table?.title
-                ? `${table.title}${assignment.status.startsWith("PROJECTED") ? " (projected)" : ""}`
-                : assignment.status
-              : "Unassigned";
-            return (
-              <tr key={participant.id}>
-                <td>{participant.displayName}</td>
-                <td>{participant.playerCategory}</td>
-                <td>{participant.signupRole ?? "PLAYER"}</td>
-                <td>{participant.confirmationStatus}</td>
-                <td>{assignmentLabel}</td>
+      <ParticipantsPanel
+        eventId={event.id}
+        participants={event.participants}
+        assignments={event.assignments}
+        tables={event.tables}
+      />
+
+      <AttendancePanel
+        eventId={event.id}
+        participants={event.participants}
+        isLocked={Boolean(event.assignmentLockedAt)}
+      />
+
+      <EligibilityRulesPanel
+        eventId={event.id}
+        rules={event.eligibilityRules ?? []}
+        settings={settings}
+      />
+
+      {event.seatingGroups && event.seatingGroups.length > 0 && (
+        <>
+          <h2>Seating Groups</h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Group ID</th>
+                <th>Split Policy</th>
+                <th>Members</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {(event.seatingGroups as SeatingGroup[]).map((group) => (
+                <tr key={group.id}>
+                  <td className="muted" style={{ fontSize: "0.8rem" }}>{group.id.slice(0, 8)}…</td>
+                  <td>{group.splitPolicy}</td>
+                  <td>
+                    {group.members.map((m) => (
+                      <span key={m.id} style={{ marginRight: "0.5rem" }}>
+                        {m.displayName ?? m.discordUserId}
+                        <span className="muted"> ({m.status})</span>
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {messageJobs && messageJobs.length > 0 && (
         <>

@@ -343,6 +343,15 @@ export class EventsService {
     return checkEligibility(rule, input.memberDiscordRoleIds);
   }
 
+  async listEligibilityRules(eventId: string) {
+    const event = await this.prisma.client.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException("Event not found");
+    return this.prisma.client.eventEligibilityRule.findMany({
+      where: { eventId },
+      orderBy: { signupRole: "asc" },
+    });
+  }
+
   async upsertEligibilityRule(eventId: string, raw: unknown) {
     const input = eligibilityRuleSchema.parse({ ...((raw as object) ?? {}), eventId }) as EligibilityRuleInput;
     const event = await this.prisma.client.event.findUnique({

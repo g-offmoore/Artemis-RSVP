@@ -46,7 +46,51 @@ export type GuildSettings = {
   defaultEventChannelId?: string;
   staffRoleIds: string[];
   adminRoleIds: string[];
+  ambassadorRoleIds: string[];
+  normalRoleIds: string[];
+  heroicRoleIds: string[];
+  temporaryRoleCleanupDays?: number;
   feedbackFormUrl?: string;
+};
+
+export type AmbassadorProfile = {
+  id: string;
+  guildId: string;
+  discordUserId: string;
+  displayName: string;
+  active: boolean;
+  supportedGameSystems: string[];
+  defaultSoftCap: number;
+  defaultHardCap: number;
+  defaultTableType: string;
+  notes?: string | null;
+  dmCountLast30Days: number;
+  backupPullCountLast90Days: number;
+  lastDmDate?: string | null;
+  _count?: { tables: number };
+};
+
+export type EligibilityRule = {
+  id: string;
+  eventId: string;
+  signupRole: string;
+  allowedDiscordRoleIds: string[];
+  requiredDiscordRoleIds: string[];
+  deniedDiscordRoleIds: string[];
+  requiresApproval: boolean;
+};
+
+export type SeatingGroup = {
+  id: string;
+  eventId: string;
+  createdByUserId: string;
+  splitPolicy: string;
+  members: Array<{
+    id: string;
+    discordUserId: string;
+    displayName?: string;
+    status: string;
+  }>;
 };
 
 export type EventSeriesSummary = {
@@ -75,8 +119,11 @@ export type EventDetail = EventSummary & {
   description?: string;
   seriesId?: string | null;
   assignmentLockedAt?: string;
+  eligibilityRules?: EligibilityRule[];
+  seatingGroups?: SeatingGroup[];
   participants: Array<{
     id: string;
+    discordUserId: string;
     displayName: string;
     participantType: string;
     playerCategory: string;

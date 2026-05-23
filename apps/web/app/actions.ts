@@ -331,6 +331,214 @@ export async function retryEventRoleAction(
   }
 }
 
+export async function updateSettingsAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const guildId = process.env.DISCORD_GUILD_ID;
+  if (!guildId) return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
+
+  const parseIds = (key: string) =>
+    valueOf(formData, key)
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  try {
+    await artemisApi(`/api/v1/guild-settings/${guildId}`, {
+      method: "PATCH",
+      body: {
+        defaultTimezone: optionalValueOf(formData, "defaultTimezone"),
+        defaultEventChannelId: optionalValueOf(formData, "defaultEventChannelId"),
+        feedbackFormUrl: valueOf(formData, "feedbackFormUrl") || null,
+        staffRoleIds: parseIds("staffRoleIds"),
+        adminRoleIds: parseIds("adminRoleIds"),
+        ambassadorRoleIds: parseIds("ambassadorRoleIds"),
+        normalRoleIds: parseIds("normalRoleIds"),
+        heroicRoleIds: parseIds("heroicRoleIds"),
+        temporaryRoleCleanupDays: valueOf(formData, "temporaryRoleCleanupDays")
+          ? parseInt(valueOf(formData, "temporaryRoleCleanupDays"), 10)
+          : undefined,
+      },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath("/settings");
+  return { ok: true, message: "Settings saved." };
+}
+
+export async function registerAmbassadorAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const guildId = process.env.DISCORD_GUILD_ID;
+  if (!guildId) return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
+
+  try {
+    await artemisApi("/api/v1/ambassadors", {
+      method: "POST",
+      body: {
+        guildId,
+        discordUserId: valueOf(formData, "discordUserId"),
+        displayName: valueOf(formData, "displayName"),
+        supportedGameSystems: valueOf(formData, "supportedGameSystems")
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+        defaultSoftCap: parseInt(valueOf(formData, "defaultSoftCap") || "6", 10),
+        defaultHardCap: parseInt(valueOf(formData, "defaultHardCap") || "7", 10),
+        defaultTableType: valueOf(formData, "defaultTableType") || "MIXED",
+        notes: optionalValueOf(formData, "notes"),
+      },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath("/ambassadors");
+  return { ok: true, message: "Ambassador registered." };
+}
+
+export async function updateAmbassadorAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const ambassadorId = valueOf(formData, "ambassadorId");
+
+  try {
+    await artemisApi(`/api/v1/ambassadors/${ambassadorId}`, {
+      method: "PATCH",
+      body: {
+        displayName: optionalValueOf(formData, "displayName"),
+        supportedGameSystems: valueOf(formData, "supportedGameSystems")
+          ? valueOf(formData, "supportedGameSystems")
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+        defaultSoftCap: valueOf(formData, "defaultSoftCap")
+          ? parseInt(valueOf(formData, "defaultSoftCap"), 10)
+          : undefined,
+        defaultHardCap: valueOf(formData, "defaultHardCap")
+          ? parseInt(valueOf(formData, "defaultHardCap"), 10)
+          : undefined,
+        defaultTableType: optionalValueOf(formData, "defaultTableType"),
+        active: valueOf(formData, "active") === "true",
+        notes: valueOf(formData, "notes") || null,
+        dmCountLast30Days: valueOf(formData, "dmCountLast30Days")
+          ? parseInt(valueOf(formData, "dmCountLast30Days"), 10)
+          : undefined,
+        backupPullCountLast90Days: valueOf(formData, "backupPullCountLast90Days")
+          ? parseInt(valueOf(formData, "backupPullCountLast90Days"), 10)
+          : undefined,
+        lastDmDate: valueOf(formData, "lastDmDate") || null,
+      },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/ambassadors/${ambassadorId}`);
+  revalidatePath("/ambassadors");
+  return { ok: true, message: "Ambassador updated." };
+}
+
+export async function deregisterAmbassadorAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const ambassadorId = valueOf(formData, "ambassadorId");
+
+  try {
+    await artemisApi(`/api/v1/ambassadors/${ambassadorId}`, { method: "DELETE" });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath("/ambassadors");
+  redirect("/ambassadors");
+}
+
+export async function upsertEligibilityRuleAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const eventId = valueOf(formData, "eventId");
+  const parseIds = (key: string) =>
+    valueOf(formData, key)
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  try {
+    await artemisApi(`/api/v1/events/${eventId}/eligibility/rules`, {
+      method: "POST",
+      body: {
+        signupRole: valueOf(formData, "signupRole"),
+        allowedDiscordRoleIds: parseIds("allowedDiscordRoleIds"),
+        requiredDiscordRoleIds: parseIds("requiredDiscordRoleIds"),
+        deniedDiscordRoleIds: parseIds("deniedDiscordRoleIds"),
+        requiresApproval: valueOf(formData, "requiresApproval") === "true",
+      },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/events/${eventId}`);
+  return { ok: true, message: "Eligibility rule saved." };
+}
+
+export async function removeRsvpAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+  const discordUserId = valueOf(formData, "discordUserId");
+
+  try {
+    await artemisApi(`/api/v1/events/${eventId}/rsvps/${discordUserId}`, {
+      method: "DELETE",
+      body: { actorDiscordId: session.discordUserId },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/events/${eventId}`);
+  return { ok: true, message: "RSVP removed." };
+}
+
+export async function confirmAttendanceAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+
+  const participantIds = formData.getAll("participantId").map(String);
+  const records = participantIds.map((participantId) => ({
+    eventParticipantId: participantId,
+    status: valueOf(formData, `status_${participantId}`) || "ATTENDED",
+    notes: optionalValueOf(formData, `notes_${participantId}`),
+  }));
+
+  try {
+    await artemisApi(`/api/v1/events/${eventId}/attendance`, {
+      method: "POST",
+      body: { actorDiscordId: session.discordUserId, records },
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/events/${eventId}`);
+  return { ok: true, message: "Attendance recorded." };
+}
+
 export async function createTableAction(
   _state: ActionState = emptyState,
   formData: FormData,
