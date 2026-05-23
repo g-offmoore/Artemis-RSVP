@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { CalendarDays, UsersRound } from "lucide-react";
+import { ArrowRight, CalendarDays, ShieldCheck, UsersRound } from "lucide-react";
 import { artemisApi, EventSummary, GuildSettings } from "../src/lib/artemis-api";
+import { allowedRoleAccessMessage } from "../src/lib/auth";
 import { EventCreateForm } from "./event-create-form";
 
 export default async function DashboardPage() {
@@ -15,6 +16,8 @@ export default async function DashboardPage() {
         ).catch(() => null)
       : Promise.resolve(null),
   ]);
+
+  const roleAccessMessage = allowedRoleAccessMessage();
 
   const totalParticipants = events.reduce(
     (sum, event) => sum + (event._count?.participants ?? 0),
@@ -53,6 +56,24 @@ export default async function DashboardPage() {
         </div>
       </section>
 
+
+      <section className="section-panel" aria-label="Ambassador management">
+        <div className="section-heading">
+          <div>
+            <h2>Ambassador Management</h2>
+            <p className="muted">
+              Assign, track, and maintain ambassador profiles used for table planning.
+            </p>
+          </div>
+          <Link className="button secondary" href="/ambassadors">
+            Open Ambassador Tools <ArrowRight size={16} />
+          </Link>
+        </div>
+        <p className="muted role-note">
+          <ShieldCheck size={16} />
+          {roleAccessMessage}
+        </p>
+      </section>
       <EventCreateForm
         defaultChannelId={
           settings?.defaultEventChannelId ??
@@ -93,6 +114,13 @@ export default async function DashboardPage() {
               <td>{event._count?.tables ?? 0}</td>
             </tr>
           ))}
+          {events.length === 0 && (
+            <tr>
+              <td colSpan={6} className="muted">
+                No events yet. Create your first event above, then use <Link href="/ambassadors">Ambassadors</Link> to register available DMs before table assignments.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </>

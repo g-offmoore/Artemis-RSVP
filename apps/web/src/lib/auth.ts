@@ -53,13 +53,25 @@ export async function clearSession() {
   cookieStore.delete(sessionCookie);
 }
 
-export function hasAllowedRole(roles: string[]) {
-  const allowed = (process.env.DASHBOARD_ALLOWED_ROLE_IDS ?? "")
+export function configuredAllowedRoleIds() {
+  return (process.env.DASHBOARD_ALLOWED_ROLE_IDS ?? "")
     .split(",")
     .map((role) => role.trim())
     .filter(Boolean);
+}
 
+export function hasAllowedRole(roles: string[]) {
+  const allowed = configuredAllowedRoleIds();
   return allowed.length === 0 || roles.some((role) => allowed.includes(role));
+}
+
+export function allowedRoleAccessMessage() {
+  const allowed = configuredAllowedRoleIds();
+  if (allowed.length === 0) {
+    return "All authenticated guild members can access dashboard and ambassador tools when no role allowlist is configured.";
+  }
+
+  return `Dashboard and ambassador tools require one of the configured Discord role IDs: ${allowed.join(", ")}.`;
 }
 
 function sign(payload: string) {
