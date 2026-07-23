@@ -542,25 +542,40 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     return;
   }
 
-  // §7.5: Player seating preferences — sit with or avoid specific players.
+  // §7.5, §14.8: Player seating preferences — sit with/avoid specific players, and
+  // prefer/avoid a specific DM/ambassador. All are soft hints, staff/admin-visible
+  // only (rules.md §5.1, §11.4), and influence assignment only after hard
+  // constraints, eligibility, and capacity are satisfied.
   if (action === "prefs") {
-    const preferMenu = new UserSelectMenuBuilder()
+    const preferPlayerMenu = new UserSelectMenuBuilder()
       .setCustomId(`pref-prefer-player:${eventId}`)
       .setPlaceholder("Players I'd like to sit with")
       .setMinValues(0)
       .setMaxValues(5);
-    const avoidMenu = new UserSelectMenuBuilder()
+    const avoidPlayerMenu = new UserSelectMenuBuilder()
       .setCustomId(`pref-avoid-player:${eventId}`)
       .setPlaceholder("Players I'd prefer to avoid sitting with")
       .setMinValues(0)
       .setMaxValues(5);
+    const preferDmMenu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-prefer-dm:${eventId}`)
+      .setPlaceholder("DM I'd like to have")
+      .setMinValues(0)
+      .setMaxValues(1);
+    const avoidDmMenu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-avoid-dm:${eventId}`)
+      .setPlaceholder("DM I'd prefer to avoid")
+      .setMinValues(0)
+      .setMaxValues(1);
     await interaction.reply({
       content:
-        "**Seating preferences** — these are soft hints, not guarantees.\n" +
-        "Use the first selector for players you'd like to sit with, the second for players you'd prefer to avoid.",
+        "**Preferences** — these are soft hints, not guarantees, and are only visible to staff.\n" +
+        "Players: who you'd like to sit with, or avoid. DM: who you'd like to have run your table, or avoid.",
       components: [
-        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferMenu),
-        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferPlayerMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidPlayerMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferDmMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidDmMenu),
       ],
       flags: MessageFlags.Ephemeral,
     });
@@ -775,9 +790,21 @@ async function handleUserSelectMenu(interaction: Interaction) {
     return;
   }
 
-  if (parts[0] === "pref-prefer-player" || parts[0] === "pref-avoid-player") {
+  if (
+    parts[0] === "pref-prefer-player" ||
+    parts[0] === "pref-avoid-player" ||
+    parts[0] === "pref-prefer-dm" ||
+    parts[0] === "pref-avoid-dm"
+  ) {
     const eventId = parts[1];
-    const preferenceType = parts[0] === "pref-prefer-player" ? "PREFER_PLAYER" : "AVOID_PLAYER";
+    const preferenceType =
+      parts[0] === "pref-prefer-player"
+        ? "PREFER_PLAYER"
+        : parts[0] === "pref-avoid-player"
+          ? "AVOID_PLAYER"
+          : parts[0] === "pref-prefer-dm"
+            ? "PREFER_DM"
+            : "AVOID_DM";
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const selected = [...interaction.users.keys()];
     if (selected.length === 0) {
@@ -794,9 +821,15 @@ async function handleUserSelectMenu(interaction: Interaction) {
         }),
       ),
     );
-    const label = preferenceType === "PREFER_PLAYER" ? "sit-with" : "avoid";
+    const labels: Record<string, string> = {
+      PREFER_PLAYER: "sit-with",
+      AVOID_PLAYER: "avoid",
+      PREFER_DM: "preferred DM",
+      AVOID_DM: "avoided DM",
+    };
+    const noun = preferenceType.endsWith("_DM") ? "DM" : "player";
     await interaction.editReply({
-      content: `Seating preference (${label}) saved for ${selected.length} player(s).`,
+      content: `Preference (${labels[preferenceType]}) saved for ${selected.length} ${noun}(s).`,
     });
     return;
   }

@@ -7,6 +7,7 @@ import {
   computeBackupDmAskScheduledFor,
   computePostEventScheduledFor,
   computePreEventScheduledFor,
+  computePreflightScheduledFor,
   computeReminderScheduledFor,
   parseBackupDmCustomId,
   type AssignmentParticipant,
@@ -569,6 +570,11 @@ describe("message job scheduling helpers", () => {
     expect(computePostEventScheduledFor(end).getTime()).toBeGreaterThan(end.getTime());
   });
 
+  it("preflight is scheduled 24 hours before startAt", () => {
+    const start = new Date("2026-08-01T18:00:00Z");
+    expect(computePreflightScheduledFor(start).toISOString()).toBe("2026-07-31T18:00:00.000Z");
+  });
+
   it("reminder is scheduled 4 hours before startAt", () => {
     const start = new Date("2026-08-01T18:00:00Z");
     expect(computeReminderScheduledFor(start).toISOString()).toBe("2026-08-01T14:00:00.000Z");
@@ -579,11 +585,13 @@ describe("message job scheduling helpers", () => {
     expect(computeBackupDmAskScheduledFor(start).toISOString()).toBe("2026-08-01T15:00:00.000Z");
   });
 
-  it("reminder fires before backup DM ask, which fires before pre-event", () => {
+  it("preflight fires before reminder, which fires before backup DM ask, which fires before pre-event", () => {
     const start = new Date("2026-08-01T18:00:00Z");
+    const preflight = computePreflightScheduledFor(start);
     const reminder = computeReminderScheduledFor(start);
     const backupAsk = computeBackupDmAskScheduledFor(start);
     const pre = computePreEventScheduledFor(start);
+    expect(preflight.getTime()).toBeLessThan(reminder.getTime());
     expect(reminder.getTime()).toBeLessThan(backupAsk.getTime());
     expect(backupAsk.getTime()).toBeLessThan(pre.getTime());
   });

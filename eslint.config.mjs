@@ -10,11 +10,6 @@ export default tseslint.config(
       "**/dist/**",
       "**/.next/**",
       "packages/db/src/generated/**",
-      "Artemis/**",
-      "src/**",
-      "prisma/**",
-      "rsvphandlers.js",
-      "rsvphandlers.ts",
       "apps/web/next-env.d.ts"
     ]
   },

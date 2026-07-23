@@ -270,17 +270,6 @@ export class EventsController {
     );
   }
 
-  @Post(":id/discord-post")
-  publishDiscordPost(
-    @Param("id") id: string,
-    @Body() body: { actorDiscordId?: string } = {},
-  ) {
-    return this.discordPosts.publishEventPost(
-      id,
-      body.actorDiscordId ?? "system",
-    );
-  }
-
   @Post(":id/attendance")
   confirmAttendance(@Param("id") id: string, @Body() body: unknown) {
     return this.events.confirmAttendance(id, body);

@@ -888,6 +888,8 @@ export function temporaryRoleName(
 export const MESSAGE_JOB_DEFAULTS = {
   preEventOffsetMs: 2 * 60 * 60 * 1000,      // 2 hours before startAt
   postEventOffsetMs: 60 * 60 * 1000,          // 1 hour after endAt
+  // T-24h: readiness/warning pass, does not lock anything (rules.md §11.1).
+  preflightOffsetMs: 24 * 60 * 60 * 1000,     // 24 hours before startAt
   reminderOffsetMs: 4 * 60 * 60 * 1000,       // 4 hours before startAt — organizer warning
   backupDmAskOffsetMs: 3 * 60 * 60 * 1000,   // 3 hours before startAt — backup DM consent ask
   // P0: assignment must lock exactly 1 hour before event start (rules.md §11.1).
@@ -900,6 +902,12 @@ export function computePreEventScheduledFor(startAt: Date): Date {
 
 export function computePostEventScheduledFor(endAt: Date): Date {
   return new Date(endAt.getTime() + MESSAGE_JOB_DEFAULTS.postEventOffsetMs);
+}
+
+// T-24h: readiness/warning pass — capacity, category, DM, backup DM, and guest
+// warnings, surfaced privately to the organizer. Does not lock participant changes.
+export function computePreflightScheduledFor(startAt: Date): Date {
+  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.preflightOffsetMs);
 }
 
 // T-4h: sends organizer a summary of projected seating, DM gaps, backup candidates.

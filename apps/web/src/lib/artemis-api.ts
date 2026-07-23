@@ -84,6 +84,16 @@ export type EligibilityRule = {
   requiresApproval: boolean;
 };
 
+export type SignupPreference = {
+  id: string;
+  userId: string;
+  preferenceType: "PREFER_DM" | "AVOID_DM" | "PREFER_PLAYER" | "AVOID_PLAYER" | "NOTE";
+  targetUserId?: string | null;
+  note?: string | null;
+  strength: "SOFT" | "HARD";
+  createdAt: string;
+};
+
 export type SeatingGroup = {
   id: string;
   eventId: string;
