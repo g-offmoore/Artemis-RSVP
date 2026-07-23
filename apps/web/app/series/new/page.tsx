@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { artemisApi, GuildSettings } from "../../../src/lib/artemis-api";
+import { requireSession } from "../../../src/lib/auth";
 import { SeriesCreateForm } from "./series-create-form";
 
-const guildId = process.env.DISCORD_GUILD_ID;
-
 export default async function NewSeriesPage() {
-  const settings = guildId
-    ? await artemisApi<GuildSettings>(
-        `/api/v1/guild-settings?guildId=${guildId}`,
-      ).catch(() => null)
-    : null;
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
+  const settings = await artemisApi<GuildSettings>(
+    `/api/v1/guild-settings?guildId=${guildId}`,
+    { guildId },
+  ).catch(() => null);
 
   return (
     <>

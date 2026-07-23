@@ -19,7 +19,7 @@ export class EventSeriesService {
   async create(body: unknown) {
     const input = eventSeriesCreateSchema.parse(body);
     const eventType = await this.prisma.client.eventType.findFirst({
-      where: { key: input.eventTypeKey },
+      where: { guildId: input.guildId, key: input.eventTypeKey },
     });
     if (!eventType) {
       throw new BadRequestException(`Unknown eventTypeKey: ${input.eventTypeKey}`);

@@ -1,4 +1,18 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { BotConfig } from "./config.js";
+
+/**
+ * Carries the Discord guild id for the interaction currently being handled, so every
+ * ArtemisApi call made while processing it is automatically scoped to the right guild
+ * without threading guildId through every handler function signature. Set once at the
+ * top of interactionCreate dispatch (see main.ts) via withGuildContext.
+ */
+const guildContext = new AsyncLocalStorage<string>();
+
+export function withGuildContext<T>(guildId: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+  if (!guildId) return fn();
+  return guildContext.run(guildId, fn);
+}
 
 export class ArtemisApiError extends Error {
   constructor(
@@ -108,10 +122,18 @@ export class ArtemisApi {
     );
   }
 
+  /** Onboard a newly-joined guild: seeds GuildSettings + default event types. */
+  async onboardGuild(guildId: string) {
+    return this.request(`/api/v1/guilds/${encodeURIComponent(guildId)}/onboard`, {
+      method: "POST",
+    });
+  }
+
   private async request(
     path: string,
     options: { method?: string; body?: unknown } = {},
   ) {
+    const currentGuildId = guildContext.getStore();
     const response = await fetch(`${this.config.API_URL}${path}`, {
       method: options.method ?? "GET",
       headers: {
@@ -119,6 +141,7 @@ export class ArtemisApi {
         ...(this.config.INTERNAL_API_TOKEN
           ? { "x-artemis-token": this.config.INTERNAL_API_TOKEN }
           : {}),
+        ...(currentGuildId ? { "x-artemis-guild-id": currentGuildId } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
     });

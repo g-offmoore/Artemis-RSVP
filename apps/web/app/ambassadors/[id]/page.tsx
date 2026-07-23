@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { artemisApi, AmbassadorProfile } from "../../../src/lib/artemis-api";
+import { requireSession } from "../../../src/lib/auth";
 import { EditAmbassadorForm } from "./edit-ambassador-form";
 
 export default async function AmbassadorPage({
@@ -8,7 +9,10 @@ export default async function AmbassadorPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const ambassador = await artemisApi<AmbassadorProfile>(`/api/v1/ambassadors/${id}`);
+  const session = await requireSession();
+  const ambassador = await artemisApi<AmbassadorProfile>(`/api/v1/ambassadors/${id}`, {
+    guildId: session.activeGuildId,
+  });
 
   return (
     <>

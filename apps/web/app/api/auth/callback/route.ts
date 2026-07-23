@@ -1,6 +1,12 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { hasAllowedRole, writeSession } from "../../../../src/lib/auth";
+import { artemisApi } from "../../../../src/lib/artemis-api";
+import {
+  GuildMembership,
+  hasAllowedRoleForGuild,
+  isPlatformAdmin,
+  writeSession,
+} from "../../../../src/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -17,18 +23,54 @@ export async function GET(request: NextRequest) {
 
   const token = await exchangeCode(code);
   const user = await discordGet<{ id: string; username: string; avatar?: string }>("/users/@me", token.access_token);
-  const member = await discordGet<{ roles: string[] }>(`/users/@me/guilds/${required("DISCORD_GUILD_ID")}/member`, token.access_token);
+  const memberOf = await discordGet<Array<{ id: string; name: string }>>("/users/@me/guilds", token.access_token);
 
-  if (!hasAllowedRole(member.roles)) {
-    return new NextResponse("Discord account does not have a dashboard role", { status: 403 });
+  const managedGuildIds = await artemisApi<string[]>("/api/v1/guilds").catch(() => [] as string[]);
+  const platformAdmin = isPlatformAdmin(user.id);
+
+  const memberOfById = new Map(memberOf.map((guild) => [guild.id, guild]));
+  const candidateGuildIds = platformAdmin
+    ? managedGuildIds
+    : managedGuildIds.filter((id) => memberOfById.has(id));
+
+  const guilds: GuildMembership[] = [];
+  for (const guildId of candidateGuildIds) {
+    const discordGuild = memberOfById.get(guildId);
+    const settings = await artemisApi<{ staffRoleIds?: string[]; adminRoleIds?: string[] }>(
+      `/api/v1/guild-settings?guildId=${guildId}`,
+      { guildId },
+    ).catch(() => null);
+
+    if (!discordGuild) {
+      // Platform admin viewing a store they aren't a Discord member of: no roles to
+      // check, admin status alone grants access.
+      if (platformAdmin) {
+        guilds.push({ guildId, name: guildId, roles: [] });
+      }
+      continue;
+    }
+
+    const member = await discordGet<{ roles: string[] }>(`/users/@me/guilds/${guildId}/member`, token.access_token).catch(
+      () => ({ roles: [] as string[] }),
+    );
+
+    if (platformAdmin || hasAllowedRoleForGuild(member.roles, settings ?? {})) {
+      guilds.push({ guildId, name: discordGuild.name, roles: member.roles });
+    }
+  }
+
+  if (guilds.length === 0) {
+    return new NextResponse("Discord account does not have dashboard access to any Artemis guild", { status: 403 });
   }
 
   await writeSession({
     discordUserId: user.id,
     username: user.username,
     avatar: user.avatar,
-    roles: member.roles,
-    createdAt: Date.now()
+    guilds,
+    activeGuildId: guilds[0].guildId,
+    isPlatformAdmin: platformAdmin,
+    createdAt: Date.now(),
   });
 
   const response = NextResponse.redirect(new URL("/", required("WEB_APP_URL")));

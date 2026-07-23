@@ -192,7 +192,8 @@ model GuildSettings {
 
 model EventType {
   id                             String        @id @default(cuid())
-  key                            String        @unique
+  guildId                        String
+  key                            String
   name                           String
   requiresRsvp                   Boolean       @default(true)
   allowsGuests                   Boolean       @default(true)
@@ -210,6 +211,9 @@ model EventType {
   series                         EventSeries[]
   createdAt                      DateTime      @default(now())
   updatedAt                      DateTime      @updatedAt
+
+  @@unique([guildId, key])
+  @@index([guildId])
 }
 
 model EventSeries {

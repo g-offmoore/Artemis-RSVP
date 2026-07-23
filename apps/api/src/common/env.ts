@@ -24,7 +24,7 @@ const envSchema = z.object({
     .default(0.7),
   PGBOSS_POOL_MAX: z.coerce.number().int().positive().default(2),
   PGBOSS_SCHEMA: z.string().trim().min(1).default("pgboss"),
-  INTERNAL_API_TOKEN: optionalString,
+  INTERNAL_API_TOKEN: z.string().trim().min(16, "INTERNAL_API_TOKEN must be set to a real secret"),
   METRICS_TOKEN: optionalString,
   DISCORD_TOKEN: optionalString,
   DISCORD_OPS_WEBHOOK_URL: optionalUrl,

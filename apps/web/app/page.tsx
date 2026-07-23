@@ -12,23 +12,21 @@ import {
   EventSummary,
   GuildSettings,
 } from "../src/lib/artemis-api";
-import { allowedRoleAccessMessage } from "../src/lib/auth";
+import { guildAccessMessage, requireSession } from "../src/lib/auth";
 import { EventCreateForm } from "./event-create-form";
 
 export default async function DashboardPage() {
-  const guildId = process.env.DISCORD_GUILD_ID;
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
   const [events, settings] = await Promise.all([
-    guildId
-      ? artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`)
-      : Promise.resolve([] as EventSummary[]),
-    guildId
-      ? artemisApi<GuildSettings>(
-          `/api/v1/guild-settings?guildId=${guildId}`,
-        ).catch(() => null)
-      : Promise.resolve(null),
+    artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`, { guildId }),
+    artemisApi<GuildSettings>(
+      `/api/v1/guild-settings?guildId=${guildId}`,
+      { guildId },
+    ).catch(() => null),
   ]);
 
-  const roleAccessMessage = allowedRoleAccessMessage();
+  const roleAccessMessage = guildAccessMessage(settings);
 
   const totalParticipants = events.reduce(
     (sum, event) => sum + (event._count?.participants ?? 0),

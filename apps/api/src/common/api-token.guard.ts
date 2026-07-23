@@ -13,8 +13,12 @@ export class ApiTokenGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
+    // INTERNAL_API_TOKEN is required at boot (see common/env.ts loadEnv()); if it's somehow
+    // still unset here, fail closed rather than silently disabling auth for every request.
     const expected = process.env.INTERNAL_API_TOKEN;
-    if (!expected) return true;
+    if (!expected) {
+      throw new UnauthorizedException("INTERNAL_API_TOKEN is not configured");
+    }
 
     const request = context.switchToHttp().getRequest<{ headers: Record<string, string | string[] | undefined> }>();
     const header = request.headers["x-artemis-token"];

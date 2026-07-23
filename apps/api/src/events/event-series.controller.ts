@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { EventSeriesGuildScopeGuard } from "../common/guild-scope.guard.js";
 import { EventSeriesService } from "./event-series.service.js";
 
 @Controller("api/v1/series")
+@UseGuards(EventSeriesGuildScopeGuard)
 export class EventSeriesController {
   constructor(private readonly series: EventSeriesService) {}
 

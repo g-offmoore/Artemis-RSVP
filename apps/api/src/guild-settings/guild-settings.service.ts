@@ -27,4 +27,11 @@ export class GuildSettingsService {
       create: { guildId, ...data },
     });
   }
+
+  async listManagedGuildIds(): Promise<string[]> {
+    const rows = await this.prisma.client.guildSettings.findMany({
+      select: { guildId: true },
+    });
+    return rows.map((row) => row.guildId);
+  }
 }

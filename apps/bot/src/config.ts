@@ -6,7 +6,6 @@ const optionalUrl = z.preprocess(emptyStringToUndefined, z.string().url().option
 
 const configSchema = z.object({
   DISCORD_TOKEN: z.string().min(1),
-  DISCORD_GUILD_ID: z.string().min(1),
   API_URL: z.string().url().default("http://api:3000"),
   INTERNAL_API_TOKEN: optionalString,
   DISCORD_OPS_WEBHOOK_URL: optionalUrl

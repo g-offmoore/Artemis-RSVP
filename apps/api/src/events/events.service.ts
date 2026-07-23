@@ -142,6 +142,7 @@ export class EventsService {
     }
 
     const eventType = await this.ensureEventType(
+      input.guildId,
       input.eventTypeKey,
       input.gameSystem,
     );
@@ -1590,10 +1591,15 @@ export class EventsService {
     }
   }
 
-  private async ensureEventType(key: string, gameSystem: string) {
+  private async ensureEventType(
+    guildId: string,
+    key: string,
+    gameSystem: string,
+  ) {
     return this.prisma.client.eventType.upsert({
-      where: { key },
+      where: { guildId_key: { guildId, key } },
       create: {
+        guildId,
         key,
         name: key === "dnd_session_night" ? "D&D Session Night" : key,
         defaultGameSystem: gameSystem,
