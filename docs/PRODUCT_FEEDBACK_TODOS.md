@@ -1,8 +1,8 @@
 # Product Feedback TODOs
 
-This file tracks areas identified from the product feedback that require future
-updates. These are intentionally marked as TODO only; no behavior is implemented
-as part of this pass.
+This file tracks remaining areas identified from the product feedback that
+require future updates. These are intentionally marked as TODO only; any mention
+of current behavior is included only to scope the remaining gap.
 
 ## Expectation Reset
 
@@ -12,23 +12,35 @@ campaign and dynamic-capacity workflow that motivated the product.
 
 ## Core Completion
 
-- TODO: Biweekly and alternating recurrence.
-- TODO: Series-level inherited configuration.
+- TODO: Alternating recurrence and parity for every biweekly series creation
+  path.
+- TODO: Series-level inherited configuration beyond current copied
+  signup-option/event-type settings.
+- TODO: Registration-window enforcement and generated-occurrence deadline
+  behavior.
+- TODO: Define and implement the participant status model across registered,
+  guaranteed, assigned, waitlisted, cancelled, and removed states.
 - TODO: Persistent campaigns with weekly RSVP requirements.
 - TODO: Per-system DM capacity tied to occurrence signup.
+- TODO: Ensure multi-system DM offers contribute capacity only once and resolve
+  to a single active table commitment.
 - TODO: Explicit assignment priority rules.
 - TODO: Automatic reassignment and waitlist promotion.
+- TODO: Handle occurrence cancellation, rescheduling, and eligibility changes
+  without silently retaining invalid assignments.
 - TODO: Notify users of every committed, user-visible status change, including
   guarantee, waitlist, assignment, reassignment, displacement, cancellation, and
   removal, while suppressing intermediate recalculation states.
 - TODO: Scoped delegated administration.
-- TODO: Discord channel and role selectors.
+- TODO: Discord role selectors and remaining channel/role selectors outside the
+  unified event creation flow.
 - TODO: Campaign/table preference priority.
 
 ## Configuration Maturity
 
-- TODO: Arbitrary participation types.
-- TODO: Custom RSVP forms.
+- TODO: Arbitrary participation types beyond labels mapped onto built-in
+  behaviors.
+- TODO: Custom RSVP forms beyond the current signup-option toggles.
 - TODO: Notification previews.
 - TODO: Fully configurable message timing and destinations.
 - TODO: Prefer-player and seating-group optimization.
@@ -46,11 +58,65 @@ campaign and dynamic-capacity workflow that motivated the product.
 
 ## Recurrence And Series
 
-- TODO: Add every-other-week recurrence and alternating program support.
-- TODO: Let series carry independent channels, roles, eligibility rules,
-  notification rules, and assignment defaults into generated events.
+- TODO: Complete alternating program support and verify every dashboard and
+  Discord series creation path exposes the existing every-other-week recurrence
+  capability.
+- TODO: Expand series-carried configuration beyond the current generated-event
+  copy of signup options to include independent channels, roles, eligibility
+  rules, notification rules, and assignment defaults.
 - TODO: Automatically generate and publish the correct next occurrence.
 - TODO: Add a post-event prompt that directs users to the newly opened RSVP.
+
+## Registration Windows
+
+- TODO: Apply series signup-open and signup-close offsets when generating
+  occurrences, instead of relying only on one-off event fields.
+- TODO: Enforce registration open and close windows across RSVP creation, RSVP
+  edits, cancellations, guest changes, and DM/table signup.
+- TODO: Support separate player and DM registration deadlines if product rules
+  require them.
+- TODO: Define and implement late RSVP behavior, including direct waitlist,
+  organizer approval, or hard rejection.
+- TODO: Preserve or intentionally reset signup timestamps when users edit an
+  RSVP, based on the final priority/tie-breaking rules.
+
+## Participant Status Model
+
+- TODO: Define the canonical participant states, including registered,
+  guaranteed, assigned, waitlisted, cancelled, and removed.
+- TODO: Decide whether guaranteed-but-unassigned is a permitted persistent
+  state or only a transient assignment-engine concept.
+- TODO: Define every allowed transition between participant states and which
+  transitions are user-driven, organizer-driven, or system-driven.
+- TODO: Ensure Discord responses, dashboard views, audit logs, and notifications
+  use the same status vocabulary.
+- TODO: Decide whether guests inherit the primary RSVP status or require their
+  own explicit participant status.
+
+## Withdrawal And Re-entry
+
+- TODO: Decide whether a cancelled player may RSVP again for the same
+  occurrence.
+- TODO: Decide whether re-entry restores the original signup timestamp or
+  creates a new timestamp for assignment priority.
+- TODO: Define whether campaign priority survives cancellation and re-entry.
+- TODO: Define whether administrative restoration differs from user
+  re-registration.
+- TODO: Notify affected users when withdrawal or re-entry changes guarantee,
+  waitlist, assignment, or campaign status.
+
+## Occurrence Cancellation And Rescheduling
+
+- TODO: Define what happens to RSVPs, guests, tables, assignments, waitlist
+  positions, and attendance records when an occurrence is cancelled.
+- TODO: Decide whether rescheduled events preserve existing RSVPs and
+  assignments.
+- TODO: Decide whether users must reconfirm after a material time, venue,
+  channel, GM, or program change.
+- TODO: Define how campaign attendance and expected-session counts handle
+  cancelled or skipped weeks.
+- TODO: Define notifications for cancellation, rescheduling, reopening, and
+  reconfirmation requests.
 
 ## Campaigns And Persistent Tables
 
@@ -73,15 +139,30 @@ campaign and dynamic-capacity workflow that motivated the product.
   campaign participant, observer, and event-specific custom roles.
 - TODO: Replace hard-coded D&D Normal/Heroic/Mixed categories with configurable
   category sets per game system or event series.
-- TODO: Add configurable RSVP questions and modals per event or series.
+- TODO: Add configurable RSVP questions and modals per event or series beyond
+  the current built-in signup-option toggles.
 
 ## Admin UX And Permissions
 
-- TODO: Replace raw Discord snowflake entry with dashboard selectors for known
-  guild channels and roles.
+- TODO: Replace remaining raw Discord snowflake entry with dashboard selectors
+  for known guild channels and roles, building on the unified event creation
+  guild/channel picker.
 - TODO: Add scoped delegated management beyond guild-wide staff/admin access,
   including owner, administrator, event manager, series/table manager,
   assignment-only, attendance-only, and settings-management scopes.
+
+## Eligibility Changes
+
+- TODO: Define behavior when a user loses a required Discord role after
+  registering.
+- TODO: Define behavior when eligibility rules change after players have
+  registered.
+- TODO: Decide whether ineligible users are automatically removed, waitlisted,
+  flagged for review, or grandfathered.
+- TODO: Notify affected users when eligibility changes invalidate their
+  registration, guarantee, waitlist position, or assignment.
+- TODO: Ensure eligibility changes for sensitive or restricted programs do not
+  expose private role, identity, preference, or moderation information.
 
 ## Assignment, Capacity, And Preferences
 
@@ -100,6 +181,40 @@ campaign and dynamic-capacity workflow that motivated the product.
   or changed-assignment users.
 - TODO: Update Discord event displays after automatic assignment changes.
 - TODO: Explain assignment and waitlist decisions in the dashboard.
+- TODO: Define which preferences are visible to GMs, series managers, and guild
+  administrators.
+- TODO: Prevent player-facing explanations from revealing another player's
+  preferences, priority, eligibility, attendance history, or restricted-program
+  status.
+- TODO: Define whether avoid-player and avoid-GM preferences are visible only to
+  restricted staff.
+- TODO: Ensure Discord roster publication does not expose private preference or
+  eligibility information.
+
+## DM Offers And Table Lifecycle
+
+- TODO: Decide whether every eligible DM signup immediately contributes capacity
+  or whether some series require organizer approval before activation.
+- TODO: Define whether newly registered ambassadors can host immediately.
+- TODO: Decide whether a backup DM promoted to primary requires confirmation.
+- TODO: Allow a DM to be removed from an occurrence without deactivating their
+  ambassador profile.
+- TODO: Define whether a DM signup expresses one committed table or multiple
+  ranked offers.
+- TODO: Define how Artemis chooses between systems or categories when a DM
+  offers several options.
+- TODO: Prevent one DM's alternative offers from contributing duplicate
+  capacity.
+- TODO: Define whether organizers may select which proposed table becomes
+  active.
+- TODO: Decide whether a DM signup automatically creates a draft table.
+- TODO: Decide whether organizers must approve ad-hoc occurrence tables.
+- TODO: Define whether a table's system/category comes from the DM signup or
+  organizer configuration.
+- TODO: Decide whether table capacity can differ from the DM's occurrence
+  capacity.
+- TODO: Decide whether a table can exist without a named DM.
+- TODO: Decide whether an active DM can be reassigned between tables.
 
 ## Notifications And Staffing
 
@@ -129,15 +244,44 @@ campaign and dynamic-capacity workflow that motivated the product.
 - TODO: Ensure Discord responses clearly distinguish registered, guaranteed,
   assigned, and waitlisted states.
 
+## Discord Failure Recovery
+
+- TODO: Define the database as the authoritative state when Discord publication,
+  message edit, thread creation, notification, or role-sync updates fail.
+- TODO: Surface Discord publication and role-sync failures in the dashboard.
+- TODO: Allow authorized users to retry failed Discord operations.
+- TODO: Prevent failed Discord updates from rolling back valid RSVP,
+  assignment, attendance, or campaign state.
+- TODO: Reconcile message, thread, role, and notification state after bot
+  downtime.
+
 ## Audit And Overrides
 
 - TODO: Record the reason for automatic assignment changes and waitlist
   decisions.
+- TODO: Store each committed assignment run as a revision with inputs, rules,
+  results, and recalculation reason.
+- TODO: Allow organizers to compare the current draft assignment against the
+  last committed revision.
+- TODO: Generate user notifications from the difference between committed
+  assignment revisions.
+- TODO: Allow rollback to a prior committed assignment revision where
+  operationally safe.
 - TODO: Record who made each manual override and whether it is protected from
   recalculation.
 - TODO: Add an explicit way to release or expire a manual assignment lock.
 - TODO: Warn administrators before an override displaces or waitlists another
   player.
+
+## Attendance And No-Shows
+
+- TODO: Decide whether attendance history affects campaign priority.
+- TODO: Decide whether repeated no-shows reduce RSVP priority or require
+  organizer approval.
+- TODO: Decide whether no-show policies are configurable per guild or series.
+- TODO: Define whether excused cancellations differ from no-shows.
+- TODO: Decide whether Artemis only reports attendance history instead of
+  enforcing attendance-based penalties.
 
 ## Feedback
 
@@ -155,14 +299,23 @@ not inferred from developer assumptions.
 - TODO: Assignment priority and tie-breaking.
 - TODO: Campaign membership and returning-player priority.
 - TODO: Draft versus published recalculation.
-- TODO: Series inheritance and occurrence overrides.
+- TODO: Series inheritance and occurrence overrides not covered by the current
+  event-type copy-at-generation behavior.
 - TODO: Registration closing and editing rules.
+- TODO: Participant status model and whether guaranteed-but-unassigned is a
+  persistent state.
+- TODO: DM offer, approval, and capacity-counting semantics.
+- TODO: Occurrence cancellation, rescheduling, and post-RSVP eligibility-change
+  behavior.
 
 ### Series Configuration Behavior
 
-- TODO: Decide whether generated occurrences copy series settings at generation
-  time or reference series settings dynamically.
-- TODO: Decide whether series edits update already-generated events.
+- TODO: Document and harden the current generated-occurrence copy behavior for
+  event-type/signup settings, then decide whether other series settings copy at
+  generation time or reference the series dynamically.
+- TODO: Decide whether edits to channels, roles, eligibility, notifications,
+  assignment defaults, title, description, or timing update already-generated
+  events.
 - TODO: Define which series settings may be overridden per occurrence.
 - TODO: Define recovery behavior when a configured Discord channel or role is
   deleted.
