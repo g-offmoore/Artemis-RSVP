@@ -40,7 +40,7 @@ Canonical names:
 - `DATABASE_MIGRATION_URL`, not `MIGRATION_DATABASE_URL`.
 - `INTERNAL_API_TOKEN`, not `API_INTERNAL_TOKEN`.
 
-Optional URLs such as `DISCORD_OPS_WEBHOOK_URL` and `FEEDBACK_FORM_URL` may be blank; the API and bot normalize blank strings to unset.
+Optional URLs such as `DISCORD_OPS_WEBHOOK_URL` may be blank; the API and bot normalize blank strings to unset. The feedback form URL is configured per-guild (`GuildSettings.feedbackFormUrl`, via the web dashboard's Settings page), not a global env var.
 
 ## Nanode Deployment Sequence
 
