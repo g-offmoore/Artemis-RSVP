@@ -119,6 +119,11 @@ export class MessageJobWorkerService implements OnModuleInit {
         // Fires 1h after the T-3h backup DM ask; notifies organizer if no one accepted.
         await this.sendBackupDmFollowUp(job, token);
         break;
+      case "ASSIGNMENT_SEATED":
+      case "ASSIGNMENT_WAITLISTED":
+        // Per-participant assignment notifications created by runAssignmentLock.
+        await this.sendAssignmentNotification(job, token);
+        break;
       default:
         this.logger.warn(`Unknown messageType ${job.messageType} for job ${job.id}`);
     }
@@ -332,17 +337,18 @@ export class MessageJobWorkerService implements OnModuleInit {
       throw err;
     }
 
-    // Send individual assignment DMs to confirmed participants (fire-and-forget).
-    void this.sendAssignmentNotifications(job.eventId, token).catch((err) =>
-      this.logger.warn({ err, eventId: job.eventId }, "Failed to send assignment notifications"),
-    );
+    // Schedule durable per-participant assignment DMs via EventMessageJob so
+    // each can be retried independently if Discord is temporarily unavailable.
+    await this.scheduleAssignmentNotifications(job.eventId);
   }
 
-  private async sendAssignmentNotifications(eventId: string, token: string) {
+  // Creates durable EventMessageJob entries for each eligible participant after
+  // assignment lock. The unique constraint on (eventId, messageType, targetId)
+  // makes this idempotent — calling twice does not duplicate jobs.
+  private async scheduleAssignmentNotifications(eventId: string) {
     const event = await this.prisma.client.event.findUnique({
       where: { id: eventId },
       include: {
-        tables: { include: { ambassadorProfile: { select: { displayName: true } } } },
         participants: {
           where: { assignmentEligible: true, participantType: "PRIMARY" },
           include: {
@@ -356,39 +362,76 @@ export class MessageJobWorkerService implements OnModuleInit {
     });
     if (!event) return;
 
-    const tableById = new Map(event.tables.map((t) => [t.id, t]));
-    const startTs = discordTs(event.startAt, "F");
-    const relTs = discordTs(event.startAt, "R");
-
+    const now = new Date();
     const notifiable = event.participants.filter(
       (p): p is typeof p & { discordUserId: string } => typeof p.discordUserId === "string",
     );
 
     await Promise.allSettled(
-      notifiable.map(async (p) => {
-        const assignment = p.assignments[0];
-        let content: string;
-        if (assignment?.eventTableId) {
-          const table = tableById.get(assignment.eventTableId);
-          const dmLine = table?.ambassadorProfile?.displayName
-            ? ` (DM: **${table.ambassadorProfile.displayName}**)`
-            : "";
-          content =
-            `✅ **Your table assignment — ${event.title}**\n\n` +
-            `You are confirmed for **${table?.title ?? "your table"}**${dmLine}.\n` +
-            `Event starts ${startTs} (${relTs})\n\n` +
-            `_Check the event thread for the full seating roster._`;
-        } else {
-          content =
-            `📋 **Waitlist notice — ${event.title}**\n\n` +
-            `Assignments have been finalized and you are currently on the waitlist.\n` +
-            `Event starts ${startTs} (${relTs})\n\n` +
-            `You may still be seated if another player cancels before the event starts.`;
-        }
-        await discordDmPost(token, p.discordUserId, { content });
-        this.logger.log(`Sent assignment notification to ${p.discordUserId} for event ${eventId}`);
+      notifiable.map((p) => {
+        const isSeated = p.assignments.length > 0;
+        const messageType = isSeated ? "ASSIGNMENT_SEATED" : "ASSIGNMENT_WAITLISTED";
+        return this.messageJobs.scheduleJob({
+          eventId,
+          messageType,
+          targetType: "USER",
+          targetId: p.discordUserId,
+          scheduledFor: now,
+        });
       }),
     );
+
+    this.logger.log(`Scheduled ${notifiable.length} assignment notification job(s) for event ${eventId}`);
+  }
+
+  // Sends a single assignment notification DM for ASSIGNMENT_SEATED/WAITLISTED jobs.
+  private async sendAssignmentNotification(
+    job: { id: string; eventId: string; targetId: string; messageType: string },
+    token: string,
+  ) {
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: job.eventId },
+      include: {
+        tables: { include: { ambassadorProfile: { select: { displayName: true } } } },
+        participants: {
+          where: { discordUserId: job.targetId, participantType: "PRIMARY" },
+          include: {
+            assignments: {
+              where: { status: { in: ["CONFIRMED_SEATED", "ASSIGNED"] } },
+              select: { eventTableId: true },
+            },
+          },
+        },
+      },
+    });
+    if (!event) throw new Error(`Event ${job.eventId} not found`);
+
+    const participant = event.participants[0];
+    const tableById = new Map(event.tables.map((t) => [t.id, t]));
+    const startTs = discordTs(event.startAt, "F");
+    const relTs = discordTs(event.startAt, "R");
+
+    let content: string;
+    if (job.messageType === "ASSIGNMENT_SEATED" && participant?.assignments[0]?.eventTableId) {
+      const table = tableById.get(participant.assignments[0].eventTableId);
+      const dmLine = table?.ambassadorProfile?.displayName
+        ? ` (DM: **${table.ambassadorProfile.displayName}**)`
+        : "";
+      content =
+        `✅ **Your table assignment — ${event.title}**\n\n` +
+        `You are confirmed for **${table?.title ?? "your table"}**${dmLine}.\n` +
+        `Event starts ${startTs} (${relTs})\n\n` +
+        `_Check the event thread for the full seating roster._`;
+    } else {
+      content =
+        `📋 **Waitlist notice — ${event.title}**\n\n` +
+        `Assignments have been finalized and you are currently on the waitlist.\n` +
+        `Event starts ${startTs} (${relTs})\n\n` +
+        `You may still be seated if another player cancels before the event starts.`;
+    }
+
+    await discordDmPost(token, job.targetId, { content });
+    this.logger.log(`Sent assignment notification (${job.messageType}) to ${job.targetId} for event ${job.eventId}`);
   }
 
   // ─── Auto-generate series occurrences ────────────────────────────────────
