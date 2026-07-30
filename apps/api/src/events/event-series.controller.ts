@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { EventSeriesGuildScopeGuard } from "../common/guild-scope.guard.js";
 import { EventSeriesService } from "./event-series.service.js";
 
@@ -25,5 +25,10 @@ export class EventSeriesController {
   @Post(":id/generate")
   generate(@Param("id") id: string, @Body() body: unknown) {
     return this.series.generate(id, body);
+  }
+
+  @Patch(":id/event-type")
+  updateEventType(@Param("id") id: string, @Body() body: unknown) {
+    return this.series.updateEventType(id, body);
   }
 }

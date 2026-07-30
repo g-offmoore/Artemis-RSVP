@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   assignParticipantsToTables,
+  calendarDaysBetweenInTimezone,
   checkEligibility,
   eventSeriesCreateSchema,
+  eventTypeOverridesSchema,
+  formatRecurrenceRule,
   guestUpdateSchema,
   makeDateInTimezone,
   nextWeekdayDate,
   nextWeekdayDateInTimezone,
+  parseRecurrenceRule,
   WEEKDAY_TO_JS,
   type AssignmentParticipant,
   type AssignmentTable,
@@ -318,5 +322,163 @@ describe("assignment engine", () => {
     if (p1Dec?.status === "ASSIGNED" && p2Dec?.status === "ASSIGNED") {
       expect(p1Dec.tableId).not.toBe(p2Dec.tableId);
     }
+  });
+});
+
+// ─── parseRecurrenceRule / formatRecurrenceRule ───────────────────────────────
+
+describe("parseRecurrenceRule", () => {
+  it("parses WEEKLY:FRI as weekly (intervalWeeks=1)", () => {
+    const result = parseRecurrenceRule("WEEKLY:FRI");
+    expect(result.weekday).toBe("FRI");
+    expect(result.intervalWeeks).toBe(1);
+  });
+
+  it("parses WEEKLY:FRI:2 as biweekly (intervalWeeks=2)", () => {
+    const result = parseRecurrenceRule("WEEKLY:FRI:2");
+    expect(result.weekday).toBe("FRI");
+    expect(result.intervalWeeks).toBe(2);
+  });
+
+  it("parses WEEKLY:MON (weekly Monday)", () => {
+    const result = parseRecurrenceRule("WEEKLY:MON");
+    expect(result.weekday).toBe("MON");
+    expect(result.intervalWeeks).toBe(1);
+  });
+
+  it("parses WEEKLY:MON:1 as weekly (intervalWeeks=1)", () => {
+    const result = parseRecurrenceRule("WEEKLY:MON:1");
+    expect(result.weekday).toBe("MON");
+    expect(result.intervalWeeks).toBe(1);
+  });
+
+  it("throws on malformed rules", () => {
+    expect(() => parseRecurrenceRule("DAILY")).toThrow();
+    expect(() => parseRecurrenceRule("WEEKLY:FRIDAY")).toThrow();
+    expect(() => parseRecurrenceRule("WEEKLY:FRI:3")).toThrow();
+    expect(() => parseRecurrenceRule("")).toThrow();
+  });
+});
+
+describe("formatRecurrenceRule", () => {
+  it("formats weekly as WEEKLY:<DAY>", () => {
+    expect(formatRecurrenceRule({ weekday: "FRI", intervalWeeks: 1 })).toBe("WEEKLY:FRI");
+  });
+
+  it("formats biweekly as WEEKLY:<DAY>:2", () => {
+    expect(formatRecurrenceRule({ weekday: "SAT", intervalWeeks: 2 })).toBe("WEEKLY:SAT:2");
+  });
+});
+
+// ─── calendarDaysBetweenInTimezone ────────────────────────────────────────────
+
+describe("calendarDaysBetweenInTimezone", () => {
+  const tz = "America/New_York";
+
+  it("returns 7 between same-weekday dates 7 days apart", () => {
+    const friday1 = new Date("2026-05-22T18:00:00Z");
+    const friday2 = new Date("2026-05-29T18:00:00Z");
+    expect(calendarDaysBetweenInTimezone(friday1, friday2, tz)).toBe(7);
+  });
+
+  it("returns 14 between same-weekday dates 14 days apart", () => {
+    const friday1 = new Date("2026-05-22T18:00:00Z");
+    const friday3 = new Date("2026-06-05T18:00:00Z");
+    expect(calendarDaysBetweenInTimezone(friday1, friday3, tz)).toBe(14);
+  });
+
+  it("is not thrown off by DST: spring-forward boundary (2026-03-08)", () => {
+    // 2026-03-07 18:00 EST (UTC-5) vs 2026-03-14 18:00 EDT (UTC-4)
+    // UTC difference is only 6h apart across the transition, but calendar days = 7
+    const before = new Date("2026-03-07T23:00:00Z"); // 6pm EST
+    const after = new Date("2026-03-14T22:00:00Z"); // 6pm EDT (one hour less UTC)
+    expect(calendarDaysBetweenInTimezone(before, after, tz)).toBe(7);
+  });
+
+  it("biweekly parity check: 7 days → odd parity → skip (7 % (2*7) !== 0)", () => {
+    const anchor = new Date("2026-05-22T18:00:00Z");
+    const oneWeekLater = new Date("2026-05-29T18:00:00Z");
+    const days = calendarDaysBetweenInTimezone(anchor, oneWeekLater, tz);
+    expect((days / 7) % 2).toBe(1); // not zero → biweekly occurrence should be skipped
+  });
+
+  it("biweekly parity check: 14 days → even parity → keep (14 % (2*7) === 0)", () => {
+    const anchor = new Date("2026-05-22T18:00:00Z");
+    const twoWeeksLater = new Date("2026-06-05T18:00:00Z");
+    const days = calendarDaysBetweenInTimezone(anchor, twoWeeksLater, tz);
+    expect((days / 7) % 2).toBe(0); // zero → biweekly occurrence is included
+  });
+});
+
+// ─── eventSeriesCreateSchema biweekly support ─────────────────────────────────
+
+describe("eventSeriesCreateSchema biweekly", () => {
+  const base = {
+    guildId: "123",
+    name: "Biweekly Friday D&D",
+    defaultChannelId: "456",
+    createdByDiscordId: "789",
+  };
+
+  it("accepts WEEKLY:FRI:2 (biweekly)", () => {
+    const result = eventSeriesCreateSchema.parse({ ...base, recurrenceRule: "WEEKLY:FRI:2" });
+    expect(result.recurrenceRule).toBe("WEEKLY:FRI:2");
+  });
+
+  it("accepts WEEKLY:FRI:1 (explicit weekly)", () => {
+    const result = eventSeriesCreateSchema.parse({ ...base, recurrenceRule: "WEEKLY:FRI:1" });
+    expect(result.recurrenceRule).toBe("WEEKLY:FRI:1");
+  });
+
+  it("rejects WEEKLY:FRI:3 (unsupported interval)", () => {
+    expect(() =>
+      eventSeriesCreateSchema.parse({ ...base, recurrenceRule: "WEEKLY:FRI:3" }),
+    ).toThrow();
+  });
+
+  it("rejects WEEKLY:FRI:0", () => {
+    expect(() =>
+      eventSeriesCreateSchema.parse({ ...base, recurrenceRule: "WEEKLY:FRI:0" }),
+    ).toThrow();
+  });
+});
+
+// ─── eventTypeOverridesSchema ────────────────────────────────────────────────
+
+describe("eventTypeOverridesSchema", () => {
+  it("fills in all defaults when called with empty object", () => {
+    const result = eventTypeOverridesSchema.parse({});
+    expect(result.requiresRsvp).toBe(true);
+    expect(result.allowsGuests).toBe(true);
+    expect(result.maxGuestsPerRsvp).toBe(3);
+    expect(result.requiresAmbassadors).toBe(true);
+    expect(result.requiresTableAssignment).toBe(true);
+    expect(result.usesPlayerCategories).toBe(true);
+    expect(result.createsTemporaryRoles).toBe(true);
+    expect(result.requiresAttendanceConfirmation).toBe(true);
+    expect(result.sendsFeedbackPrompts).toBe(true);
+    expect(result.usesWaitlist).toBe(true);
+    expect(result.allowsNameOnlyWalkIns).toBe(true);
+  });
+
+  it("respects overridden boolean fields", () => {
+    const result = eventTypeOverridesSchema.parse({
+      requiresRsvp: false,
+      allowsGuests: false,
+      usesWaitlist: false,
+    });
+    expect(result.requiresRsvp).toBe(false);
+    expect(result.allowsGuests).toBe(false);
+    expect(result.usesWaitlist).toBe(false);
+    expect(result.requiresAmbassadors).toBe(true); // unspecified → default
+  });
+
+  it("accepts an optional name string", () => {
+    const result = eventTypeOverridesSchema.parse({ name: "Board Game Night" });
+    expect(result.name).toBe("Board Game Night");
+  });
+
+  it("rejects negative maxGuestsPerRsvp", () => {
+    expect(() => eventTypeOverridesSchema.parse({ maxGuestsPerRsvp: -1 })).toThrow();
   });
 });

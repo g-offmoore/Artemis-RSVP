@@ -121,6 +121,7 @@ export type EventSeriesSummary = {
 };
 
 export type EventSeriesDetail = EventSeriesSummary & {
+  eventType?: EventTypeConfig;
   events: Array<{
     id: string;
     title: string;
@@ -129,10 +130,37 @@ export type EventSeriesDetail = EventSeriesSummary & {
   }>;
 };
 
+export type EventTypeConfig = {
+  id: string;
+  name: string;
+  requiresRsvp: boolean;
+  allowsGuests: boolean;
+  maxGuestsPerRsvp: number;
+  requiresAmbassadors: boolean;
+  requiresTableAssignment: boolean;
+  usesPlayerCategories: boolean;
+  createsTemporaryRoles: boolean;
+  requiresAttendanceConfirmation: boolean;
+  sendsFeedbackPrompts: boolean;
+  usesWaitlist: boolean;
+  allowsNameOnlyWalkIns: boolean;
+};
+
+export type GuildSummary = {
+  guildId: string;
+  name: string | null;
+};
+
+export type ChannelSummary = {
+  id: string;
+  name: string;
+};
+
 export type EventDetail = EventSummary & {
   description?: string;
   seriesId?: string | null;
   assignmentLockedAt?: string;
+  eventType?: EventTypeConfig;
   eligibilityRules?: EligibilityRule[];
   seatingGroups?: SeatingGroup[];
   participants: Array<{

@@ -81,17 +81,20 @@ const client = new Client({
 
 client.once(Events.ClientReady, async () => {
   logger.info({ user: client.user?.tag }, "Discord bot logged in");
-  // Backfill command registration for every guild the bot is already in, covering
-  // restarts and the pre-multi-guild production install. New installs are handled by
-  // the guildCreate handler below.
+  // Backfill command registration and refresh the stored guild name for every
+  // guild the bot is already in, covering restarts, renames, and the
+  // pre-multi-guild production install. New installs are handled by the
+  // guildCreate handler below.
   for (const guild of client.guilds.cache.values()) {
     await registerCommandsForGuild(guild.id);
+    await refreshGuildName(guild.id, guild.name);
   }
 });
 
 client.on(Events.GuildCreate, async (guild) => {
   logger.info({ guildId: guild.id, name: guild.name }, "Bot joined a new guild");
   await onboardGuild(guild.id);
+  await refreshGuildName(guild.id, guild.name);
 });
 
 client.on("error", (error) => logger.error({ error }, "Discord client error"));
@@ -285,6 +288,14 @@ function buildCommands() {
 async function registerCommandsForGuild(guildId: string) {
   await client.application?.commands.set(buildCommands(), guildId);
   logger.info({ guildId }, "Slash commands registered for guild");
+}
+
+async function refreshGuildName(guildId: string, name: string) {
+  try {
+    await withGuildContext(guildId, () => api.updateGuildSettings(guildId, { name }));
+  } catch (error) {
+    logger.warn({ error, guildId }, "Failed to refresh stored guild name");
+  }
 }
 
 async function onboardGuild(guildId: string) {

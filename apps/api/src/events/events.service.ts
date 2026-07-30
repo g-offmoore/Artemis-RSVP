@@ -11,6 +11,7 @@ import {
   eligibilityRuleSchema,
   eventCreateSchema,
   eventUpdateSchema,
+  eventTypeUpdateSchema,
   guestUpdateSchema,
   rsvpCreateSchema,
   tableCreateSchema,
@@ -24,6 +25,7 @@ import { MetricsService } from "../metrics/metrics.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
 import { DiscordRoleService } from "./discord-role.service.js";
+import { createEventType, resolveOwnedEventType } from "./event-type.util.js";
 
 const attendanceInputSchema = z.object({
   actorDiscordId: z.string().min(1),
@@ -141,41 +143,41 @@ export class EventsService {
       );
     }
 
-    const eventType = await this.ensureEventType(
-      input.guildId,
-      input.eventTypeKey,
-      input.gameSystem,
-    );
     const roleCleanupAt = new Date(
       input.endAt.getTime() + 14 * 24 * 60 * 60 * 1000,
     );
 
-    const event = await this.prisma.client.event.create({
-      data: {
-        guildId: input.guildId,
-        channelId: input.channelId,
-        title: input.title,
-        description: input.description,
-        imageUrl: input.imageUrl,
-        eventTypeId: eventType.id,
-        gameSystem: input.gameSystem,
-        startAt: input.startAt,
-        endAt: input.endAt,
-        signupOpensAt: input.signupOpensAt,
-        signupClosesAt: input.signupClosesAt,
-        roleCleanupAt,
-        createdByDiscordId: input.createdByDiscordId,
-        ...(input.seriesId ? { seriesId: input.seriesId } : {}),
-        auditLogs: {
-          create: {
-            guildId: input.guildId,
-            actorDiscordId: input.createdByDiscordId,
-            action: "event.created",
-            afterValue: input,
+    // EventType + Event are created together so a failure partway through never
+    // leaves an orphaned EventType row with no owning event.
+    const event = await this.prisma.client.$transaction(async (tx) => {
+      const eventType = await createEventType(tx, input.guildId, input.eventType, input.gameSystem);
+      return tx.event.create({
+        data: {
+          guildId: input.guildId,
+          channelId: input.channelId,
+          title: input.title,
+          description: input.description,
+          imageUrl: input.imageUrl,
+          eventTypeId: eventType.id,
+          gameSystem: input.gameSystem,
+          startAt: input.startAt,
+          endAt: input.endAt,
+          signupOpensAt: input.signupOpensAt,
+          signupClosesAt: input.signupClosesAt,
+          roleCleanupAt,
+          createdByDiscordId: input.createdByDiscordId,
+          ...(input.seriesId ? { seriesId: input.seriesId } : {}),
+          auditLogs: {
+            create: {
+              guildId: input.guildId,
+              actorDiscordId: input.createdByDiscordId,
+              action: "event.created",
+              afterValue: input,
+            },
           },
         },
-      },
-      include: { eventType: true },
+        include: { eventType: true },
+      });
     });
 
     // Schedule pre/post event message jobs after creation.
@@ -217,6 +219,22 @@ export class EventsService {
     });
 
     return event;
+  }
+
+  /**
+   * Edit this event's own signup-option config. Copy-on-write: if the
+   * underlying EventType row still predates per-event overrides and is shared
+   * with other events/series, it's cloned first so this edit can never mutate
+   * a sibling.
+   */
+  async updateEventType(id: string, raw: unknown) {
+    const input = eventTypeUpdateSchema.parse(raw);
+    return this.prisma.client.$transaction(async (tx) => {
+      const event = await tx.event.findUnique({ where: { id }, select: { eventTypeId: true } });
+      if (!event) throw new NotFoundException("Event not found");
+      const owned = await resolveOwnedEventType(tx, event.eventTypeId, { kind: "event", id });
+      return tx.eventType.update({ where: { id: owned.id }, data: input });
+    });
   }
 
   async update(id: string, raw: unknown) {
@@ -1591,22 +1609,6 @@ export class EventsService {
     }
   }
 
-  private async ensureEventType(
-    guildId: string,
-    key: string,
-    gameSystem: string,
-  ) {
-    return this.prisma.client.eventType.upsert({
-      where: { guildId_key: { guildId, key } },
-      create: {
-        guildId,
-        key,
-        name: key === "dnd_session_night" ? "D&D Session Night" : key,
-        defaultGameSystem: gameSystem,
-      },
-      update: {},
-    });
-  }
 }
 
 function usesDndCategories(gameSystem: string) {

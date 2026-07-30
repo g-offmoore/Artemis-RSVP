@@ -60,6 +60,11 @@ export class EventsController {
     return event;
   }
 
+  @Patch(":id/event-type")
+  updateEventType(@Param("id") id: string, @Body() body: unknown) {
+    return this.events.updateEventType(id, body);
+  }
+
   @Delete(":id")
   async cancel(
     @Param("id") id: string,
