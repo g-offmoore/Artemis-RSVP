@@ -43,6 +43,7 @@ export class DiscordEventPostService {
       include: {
         tables: true,
         participants: true,
+        eventType: true,
       },
     });
     if (!event) throw new NotFoundException("Event not found");
@@ -211,6 +212,7 @@ function eventButtons(event: {
   id: string;
   gameSystem: string;
   status: string;
+  eventType: { allowsGuests: boolean } | null;
 }): DiscordComponent[] {
   if (event.status === "CANCELLED") return [];
 
@@ -222,8 +224,11 @@ function eventButtons(event: {
       ]
     : [button(`rsvp:${event.id}:MIXED`, "RSVP", 3)];
 
+  if (event.eventType?.allowsGuests !== false) {
+    row1.push(button(`guest:${event.id}`, "Guests", 2));
+  }
+
   row1.push(
-    button(`guest:${event.id}`, "Guests", 2),
     button(`host:${event.id}`, vocabulary.hostButtonLabel, 2),
     button(`assignment:${event.id}`, "My Assignment", 2),
   );

@@ -992,11 +992,16 @@ function eventButtons(event: any): ActionRowBuilder<ButtonBuilder>[] {
           .setStyle(ButtonStyle.Success),
       ];
 
+  if (event.eventType?.allowsGuests !== false) {
+    row1Buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`guest:${event.id}`)
+        .setLabel("Guests")
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+
   row1Buttons.push(
-    new ButtonBuilder()
-      .setCustomId(`guest:${event.id}`)
-      .setLabel("Guests")
-      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`host:${event.id}`)
       .setLabel(vocabulary.hostButtonLabel)

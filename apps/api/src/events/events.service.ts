@@ -431,6 +431,7 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    checkRegistrationWindow(event);
 
     // TODO(product-feedback): RSVP inputs are fixed. Replace with configurable
     // per-event/series questions for systems, categories, campaigns, apprentice
@@ -606,6 +607,8 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    if (!event.eventType.allowsGuests) throw new ForbiddenException("This event does not allow guests.");
+    checkRegistrationWindow(event);
     if (input.guests.length > event.eventType.maxGuestsPerRsvp) {
       throw new BadRequestException(
         `This event allows at most ${event.eventType.maxGuestsPerRsvp} guests`,
@@ -751,6 +754,7 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    checkRegistrationWindow(event);
 
     // TODO(product-feedback): This is occurrence-specific table registration,
     // but it still lacks configured per-system defaults and authorized
@@ -1644,4 +1648,17 @@ export class EventsService {
 function usesDndCategories(gameSystem: string) {
   const value = gameSystem.trim().toLowerCase();
   return value === "d&d" || value === "dnd" || value.includes("dungeons");
+}
+
+function checkRegistrationWindow(event: {
+  signupOpensAt: Date | null;
+  signupClosesAt: Date | null;
+}) {
+  const now = new Date();
+  if (event.signupOpensAt && now < event.signupOpensAt) {
+    throw new ForbiddenException("Registration for this event has not opened yet.");
+  }
+  if (event.signupClosesAt && now > event.signupClosesAt) {
+    throw new ForbiddenException("Registration for this event has closed.");
+  }
 }
