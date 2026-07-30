@@ -40,7 +40,7 @@ export default async function SettingsPage() {
           </Link>
         </section>
       )}
-      <SettingsForm settings={settings} canEdit={canEdit} currentUserId={session.discordUserId} />
+      <SettingsForm settings={settings} canEdit={canEdit} currentUserId={session.discordUserId} guildId={guildId} />
     </>
   );
 }

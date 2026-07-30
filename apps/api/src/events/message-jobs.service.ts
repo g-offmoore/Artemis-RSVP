@@ -25,6 +25,8 @@ type EventForMessageJobs = {
   endAt: Date;
   // createdByDiscordId targets the REMINDER DM to the event organizer (rules.md §12.4).
   createdByDiscordId: string;
+  // When set, the PREFLIGHT alert fires this many hours before startAt instead of 24h.
+  shortageAlertHoursBefore: number | null;
 };
 
 @Injectable()
@@ -51,7 +53,7 @@ export class MessageJobsService {
   async scheduleEventMessages(event: EventForMessageJobs): Promise<void> {
     const preScheduledFor = computePreEventScheduledFor(event.startAt);
     const postScheduledFor = computePostEventScheduledFor(event.endAt);
-    const preflightScheduledFor = computePreflightScheduledFor(event.startAt);
+    const preflightScheduledFor = computePreflightScheduledFor(event.startAt, event.shortageAlertHoursBefore);
     const reminderScheduledFor = computeReminderScheduledFor(event.startAt);
     const backupDmAskScheduledFor = computeBackupDmAskScheduledFor(event.startAt);
     const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt);
@@ -95,7 +97,7 @@ export class MessageJobsService {
   async rescheduleEventMessages(event: EventForMessageJobs): Promise<void> {
     const preScheduledFor = computePreEventScheduledFor(event.startAt);
     const postScheduledFor = computePostEventScheduledFor(event.endAt);
-    const preflightScheduledFor = computePreflightScheduledFor(event.startAt);
+    const preflightScheduledFor = computePreflightScheduledFor(event.startAt, event.shortageAlertHoursBefore);
     const reminderScheduledFor = computeReminderScheduledFor(event.startAt);
     const backupDmAskScheduledFor = computeBackupDmAskScheduledFor(event.startAt);
     const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt);

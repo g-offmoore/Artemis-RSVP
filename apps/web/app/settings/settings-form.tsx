@@ -6,14 +6,18 @@ import { updateSettingsAction, ActionState } from "../actions";
 
 const emptyState: ActionState = { ok: false, message: "" };
 
+type ChannelOption = { id: string; name: string };
+
 export function SettingsForm({
   settings,
   canEdit,
   currentUserId,
+  guildId,
 }: {
   settings: GuildSettings | null;
   canEdit: boolean;
   currentUserId: string;
+  guildId: string;
 }) {
   const [state, action, pending] = useActionState(updateSettingsAction, emptyState);
   const formRef = useRef<HTMLFormElement>(null);
@@ -21,11 +25,23 @@ export function SettingsForm({
   const [lastAttemptedAt, setLastAttemptedAt] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string>("");
 
+  // Live channel list fetched from the guild-channels proxy.
+  const [channels, setChannels] = useState<ChannelOption[]>([]);
+  const [channelsLoaded, setChannelsLoaded] = useState(false);
+  const [selectedChannelId, setSelectedChannelId] = useState(settings?.defaultEventChannelId ?? "");
+
+  useEffect(() => {
+    fetch(`/api/guilds/${guildId}/channels`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data: ChannelOption[]) => {
+        setChannels(data);
+        setChannelsLoaded(true);
+      })
+      .catch(() => setChannelsLoaded(true));
+  }, [guildId]);
+
   const joinIds = (ids: string[] | undefined) => (ids ?? []).join("\n");
 
-  // TODO(product-feedback): Replace raw Discord snowflake text fields with
-  // dashboard selectors that resolve guild channels and roles by recognizable
-  // names.
   const isSnowflake = (value: string) => /^\d{17,20}$/.test(value.trim());
   const isTimezoneLike = (value: string) => /^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(value.trim());
 
@@ -34,7 +50,7 @@ export function SettingsForm({
     if (!form) return "";
 
     const timezone = (form.elements.namedItem("defaultTimezone") as HTMLInputElement).value.trim();
-    const channelId = (form.elements.namedItem("defaultEventChannelId") as HTMLInputElement).value.trim();
+    const channelId = selectedChannelId.trim();
     const adminRoleIds = (form.elements.namedItem("adminRoleIds") as HTMLTextAreaElement).value;
     const allRoleValues = [
       adminRoleIds,
@@ -49,7 +65,8 @@ export function SettingsForm({
       .filter(Boolean);
 
     if (!timezone || !isTimezoneLike(timezone)) return "Enter a valid default timezone (e.g., America/New_York).";
-    if (!channelId || !isSnowflake(channelId)) return "Default event channel ID is required and must be a Discord snowflake.";
+    if (!channelId) return "Default event channel is required.";
+    if (channels.length === 0 && !isSnowflake(channelId)) return "Default event channel ID must be a Discord snowflake (17–20 digits).";
     if (!adminRoleIds.trim()) return "At least one admin role ID is required to protect settings access.";
     if (allRoleValues.some((id) => !isSnowflake(id))) return "All role IDs must be valid Discord snowflakes (17–20 digits).";
     return "";
@@ -91,14 +108,32 @@ export function SettingsForm({
         />
       </div>
       <div className="field">
-        <label>Default Event Channel ID</label>
-        <input
-          name="defaultEventChannelId"
-          defaultValue={settings?.defaultEventChannelId ?? ""}
-          placeholder="Discord channel snowflake"
-          required
-          readOnly={!canEdit}
-        />
+        <label>Default Event Channel</label>
+        {/* Hidden field always carries the value so form submission works for both picker and text fallback */}
+        <input type="hidden" name="defaultEventChannelId" value={selectedChannelId} />
+        {channelsLoaded && channels.length > 0 ? (
+          <select
+            value={selectedChannelId}
+            onChange={(e) => setSelectedChannelId(e.target.value)}
+            required
+            disabled={!canEdit}
+          >
+            <option value="">— select a channel —</option>
+            {channels.map((ch) => (
+              <option key={ch.id} value={ch.id}>
+                #{ch.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={selectedChannelId}
+            onChange={(e) => setSelectedChannelId(e.target.value)}
+            placeholder={channelsLoaded ? "Discord channel snowflake" : "Loading channels…"}
+            required
+            readOnly={!canEdit}
+          />
+        )}
       </div>
       <h2>Role access</h2>
       <p className="muted" style={{ marginBottom: "1rem" }}>

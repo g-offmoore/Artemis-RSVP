@@ -503,8 +503,8 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     });
     await interaction.editReply({
       content: vocabulary.usesDndCategories
-        ? `RSVP recorded as ${formatCategory(selectedCategory)}. Use Guests if you are bringing anyone with you.`
-        : "RSVP recorded. Use Guests if you are bringing anyone with you.",
+        ? `You're registered as ${formatCategory(selectedCategory)}. Use the Guests button if you're bringing anyone.`
+        : "You're registered for this event. Use the Guests button if you're bringing anyone.",
     });
     await refreshEventMessage(interaction, eventId);
     return;
@@ -1191,7 +1191,8 @@ function userFacingError(error: unknown) {
     if (error.status === 404 && /RSVP not found/i.test(error.responseBody)) {
       return "RSVP first, then add guests.";
     }
-    if (error.status === 400) {
+    // 400 Bad Request, 403 Forbidden, 409 Conflict — all carry a user-readable message.
+    if (error.status === 400 || error.status === 403 || error.status === 409) {
       return (
         apiValidationMessage(error.responseBody) ??
         "Artemis could not save that because part of the request was not valid."

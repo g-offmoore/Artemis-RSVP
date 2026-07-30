@@ -153,6 +153,7 @@ export const eventCreateSchema = z.object({
   endAt: eventDateSchema,
   signupOpensAt: eventDateSchema.optional(),
   signupClosesAt: eventDateSchema.optional(),
+  shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
   createdByDiscordId: z.string().min(1),
   seriesId: z.string().optional(),
 });
@@ -328,6 +329,7 @@ export const eventUpdateSchema = z.object({
   gameSystem: z.string().trim().min(1).optional(),
   startAt: eventDateSchema.optional(),
   endAt: eventDateSchema.optional(),
+  shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
   actorDiscordId: z.string().min(1),
   applyToFuture: z.boolean().optional(),
 });
@@ -358,6 +360,7 @@ export const eventSeriesCreateSchema = z.object({
   defaultStartHour: z.number().int().min(0).max(23).default(18),
   defaultStartMinute: z.number().int().min(0).max(59).default(0),
   defaultDurationMinutes: z.number().int().min(30).max(720).default(240),
+  shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
   createdByDiscordId: z.string().min(1),
 });
 export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateSchema>;
@@ -1012,10 +1015,14 @@ export function computePostEventScheduledFor(endAt: Date): Date {
   return new Date(endAt.getTime() + MESSAGE_JOB_DEFAULTS.postEventOffsetMs);
 }
 
-// T-24h: readiness/warning pass — capacity, category, DM, backup DM, and guest
+// T-{N}h: readiness/warning pass — capacity, category, DM, backup DM, and guest
 // warnings, surfaced privately to the organizer. Does not lock participant changes.
-export function computePreflightScheduledFor(startAt: Date): Date {
-  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.preflightOffsetMs);
+// When overrideHours is provided (per-event/series config), it replaces the 24h default.
+export function computePreflightScheduledFor(startAt: Date, overrideHours?: number | null): Date {
+  const offsetMs = overrideHours != null
+    ? overrideHours * 60 * 60 * 1000
+    : MESSAGE_JOB_DEFAULTS.preflightOffsetMs;
+  return new Date(startAt.getTime() - offsetMs);
 }
 
 // T-4h: sends organizer a summary of projected seating, DM gaps, backup candidates.

@@ -121,6 +121,7 @@ export type EventSeriesSummary = {
 };
 
 export type EventSeriesDetail = EventSeriesSummary & {
+  shortageAlertHoursBefore?: number | null;
   eventType?: EventTypeConfig;
   events: Array<{
     id: string;
@@ -160,6 +161,7 @@ export type EventDetail = EventSummary & {
   description?: string;
   seriesId?: string | null;
   assignmentLockedAt?: string;
+  shortageAlertHoursBefore?: number | null;
   eventType?: EventTypeConfig;
   eligibilityRules?: EligibilityRule[];
   seatingGroups?: SeatingGroup[];

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   eventSeriesCreateSchema,
   eventTypeUpdateSchema,
@@ -44,6 +44,7 @@ export class EventSeriesService {
           defaultStartHour: input.defaultStartHour,
           defaultStartMinute: input.defaultStartMinute,
           defaultDurationMinutes: input.defaultDurationMinutes,
+          shortageAlertHoursBefore: input.shortageAlertHoursBefore ?? null,
           createdByDiscordId: input.createdByDiscordId,
         },
       });
@@ -114,7 +115,13 @@ export class EventSeriesService {
     });
     if (!series) throw new NotFoundException("Series not found");
 
-    const { weekday: dayAbbr, intervalWeeks } = parseRecurrenceRule(series.recurrenceRule);
+    let weekday: string, intervalWeeks: 1 | 2;
+    try {
+      ({ weekday, intervalWeeks } = parseRecurrenceRule(series.recurrenceRule));
+    } catch {
+      throw new BadRequestException(`Invalid recurrence rule: ${series.recurrenceRule}`);
+    }
+    const dayAbbr = weekday;
     const targetDay = WEEKDAY_TO_JS[dayAbbr];
 
     // Resolve the guild timezone once for the whole batch.
@@ -204,6 +211,7 @@ export class EventSeriesService {
         gameSystem: series.defaultGameSystem,
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
+        shortageAlertHoursBefore: series.shortageAlertHoursBefore ?? undefined,
         createdByDiscordId: series.createdByDiscordId,
         seriesId: series.id,
       });

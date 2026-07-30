@@ -202,6 +202,7 @@ export default async function EventPage({
         seriesDefaultChannelId={undefined}
         defaultStatus={event.status}
         defaultEventType={event.seriesId ? "SERIES_OCCURRENCE" : "ONE_SHOT"}
+        defaultShortageAlertHours={event.shortageAlertHoursBefore}
       />
 
       <h2>Tables</h2>
