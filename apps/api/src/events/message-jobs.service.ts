@@ -46,10 +46,10 @@ export class MessageJobsService {
   //
   // ASSIGNMENT_LOCK is a P0 requirement per rules.md §11.1: assignment must
   // run and lock exactly 1 hour before event start.
-  // TODO(product-feedback): These fixed offsets and destinations should become
-  // configurable per series/event, including registration open time, shortage
-  // alerts, role mentions, user DMs, final assignment publication, and next-RSVP
-  // announcements.
+  // TODO(product-feedback): Preflight timing is configurable, and series signup
+  // windows are copied into occurrences. Remaining notification policy work is
+  // configurable destinations, role mentions, durable user DMs, final assignment
+  // publication, and next-RSVP announcements.
   async scheduleEventMessages(event: EventForMessageJobs): Promise<void> {
     const preScheduledFor = computePreEventScheduledFor(event.startAt);
     const postScheduledFor = computePostEventScheduledFor(event.endAt);

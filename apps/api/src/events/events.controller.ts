@@ -166,7 +166,7 @@ export class EventsController {
 
   // ─── Event role ───────────────────────────────────────────────────────────
 
-  // Retry Discord role creation after a failure (manual remediation, §12.6).
+  // Retry Discord role creation after a failure (manual remediation, §12.7).
   @Post(":id/roles/retry")
   retryEventRole(@Param("id") id: string) {
     return this.discordRole.retryEventRole(id);

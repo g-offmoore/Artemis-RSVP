@@ -63,7 +63,7 @@ export default async function EventPage({
         backupPullCountLast90Days: number;
       }>
     >(`/api/v1/events/${id}/backup-dm/candidates`, { guildId }).catch(() => []),
-    // Staff/admin-only: player-with-player and player-with-DM preferences (rules.md §5.1, §11.4).
+    // Staff/admin-only: player-with-player and player-with-DM preferences (rules.md §7.5).
     artemisApi<SignupPreference[]>(`/api/v1/events/${id}/preferences`, { guildId }).catch(() => []),
   ]);
   const eventTimeZone =

@@ -130,7 +130,7 @@ export class DiscordRoleService {
   }
 
   /**
-   * §12.6: Create the private Discord thread for an event and persist its ID.
+   * §12.7: Create the private Discord thread for an event and persist its ID.
    * Idempotent — returns the existing thread if already created.
    * Thread type 12 = PRIVATE_THREAD; requires server boost level 2+ on some guilds.
    * Failures are logged and reported to the organizer; they do not block event creation.

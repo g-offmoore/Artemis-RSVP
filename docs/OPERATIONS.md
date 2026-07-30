@@ -162,7 +162,7 @@ Open the event detail page and expand **Edit Event**. Changes are saved to the d
 
 ### Cancelling an Event
 
-Click **Cancel event** on the event detail page. The status is set to CANCELLED and the Discord embed is updated to reflect the cancelled state. The DB record is preserved.
+Click **Cancel event** on the event detail page. The status is set to CANCELLED, pending message jobs are cancelled, and the Discord embed is updated without signup controls. The DB record is preserved.
 
 ### Publishing and Re-publishing
 

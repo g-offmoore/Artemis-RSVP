@@ -383,7 +383,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
 
     // Defer publicly — the success reply IS the event post in the channel.
     // Errors must be made ephemeral so failures never appear publicly
-    // (rules.md §12.3, §25: "Event creation failure must be ephemeral/private").
+    // (rules.md §4.2, §12.3: event creation failures are private).
     await interaction.deferReply();
     const image = interaction.options.getAttachment("image");
     const payload = {
@@ -554,14 +554,14 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     return;
   }
 
-  // §7.5, §14.8: Player seating preferences — sit with/avoid specific players, and
+  // §7.5, §11.7: Player seating preferences — sit with/avoid specific players, and
   // prefer/avoid a specific DM/ambassador. All are soft hints, staff/admin-visible
-  // only (rules.md §5.1, §11.4), and influence assignment only after hard
+  // only, and influence assignment only after hard
   // constraints, eligibility, and capacity are satisfied.
   if (action === "prefs") {
     // TODO(product-feedback): Preferences should support configurable targets
-    // such as campaign, persistent table, game system, play category, and
-    // preferred players, not just fixed user select menus.
+    // such as persistent table, game system, play category, and preferred
+    // players. Campaign continuity currently comes from RSVP campaignId.
     const preferPlayerMenu = new UserSelectMenuBuilder()
       .setCustomId(`pref-prefer-player:${eventId}`)
       .setPlaceholder("Players I'd like to sit with")

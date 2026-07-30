@@ -78,7 +78,7 @@ export class MessageJobWorkerService implements OnModuleInit {
       this.logger.warn({ err }, "Failed during auto-generate series occurrences");
     });
 
-    // §12.6: Clean up expired Discord event roles on each cron tick.
+    // §12.7: Clean up expired Discord event roles on each cron tick.
     await this.discordRole.processExpiredRoles().catch((err) => {
       this.logger.warn({ err }, "Failed to process expired event roles");
     });

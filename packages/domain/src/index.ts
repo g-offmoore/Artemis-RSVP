@@ -690,9 +690,10 @@ export function assignParticipantsToTables(
   participants: AssignmentParticipant[],
   tables: AssignmentTable[],
 ): AssignmentResult {
-  // TODO(product-feedback): Add explicit priority scoring for preferred GM,
-  // preferred player/party, campaign, persistent table, game system, and play
-  // category before otherwise compatible no-preference players.
+  // TODO(product-feedback): Add explicit priority scoring for preferred
+  // player/party, persistent table, game system, and play category before
+  // otherwise compatible no-preference players. Campaign continuity is currently
+  // translated into preferredTableIds by the API before calling the engine.
   const warnings: AssignmentWarning[] = [];
   const decisions: AssignmentDecision[] = [];
   const counts = new Map<string, number>();

@@ -242,7 +242,7 @@ export class EventsService {
       shortageAlertHoursBefore: event.shortageAlertHoursBefore,
     });
 
-    // §12.6: Create the temporary Discord player role at event creation, not publish.
+    // §12.7: Create the temporary Discord player role at event creation, not publish.
     // ensureEventRole records a pending/failed state if Discord is unavailable and
     // sends a private DM to the organizer — never silently drops the failure.
     void this.discordRole.ensureEventRole({
@@ -258,7 +258,7 @@ export class EventsService {
       }
     });
 
-    // §12.6: Create the private event thread (fire-and-forget; failures logged and organizer notified).
+    // §12.7: Create the private event thread (fire-and-forget; failures logged and organizer notified).
     void this.discordRole.ensureEventThread({
       id: event.id,
       guildId: event.guildId,
@@ -485,8 +485,8 @@ export class EventsService {
     checkRegistrationWindow(event);
 
     // TODO(product-feedback): RSVP inputs are fixed. Replace with configurable
-    // per-event/series questions for systems, categories, campaigns, apprentice
-    // GM availability, and no-preference choices.
+    // per-event/series questions for systems, categories, campaign intent,
+    // apprentice GM availability, and no-preference choices.
 
     // Server-side eligibility enforcement.
     const memberRoleIds =
@@ -625,7 +625,7 @@ export class EventsService {
       });
     });
 
-    // §12.6: Fire-and-forget Discord role assignment and thread membership — RSVP always succeeds.
+    // §12.7: Fire-and-forget Discord role assignment and thread membership — RSVP always succeeds.
     void (async () => {
       const [eventRole, eventWithThread] = await Promise.all([
         this.prisma.client.eventRole.findUnique({
@@ -777,7 +777,7 @@ export class EventsService {
       },
     });
 
-    // §12.6: Fire-and-forget Discord role removal — cancel always succeeds regardless.
+    // §12.7: Fire-and-forget Discord role removal — cancel always succeeds regardless.
     void (async () => {
       const eventRole = await this.prisma.client.eventRole.findUnique({
         where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
@@ -868,8 +868,8 @@ export class EventsService {
     });
 
     // TODO(product-feedback): Capacity changes from table/DM signup should
-    // trigger assignment reruns, waitlist promotion, user notifications, and
-    // Discord post refresh without a manual /event assign.
+    // refresh draft assignments before lock and trigger waitlist promotion,
+    // user notifications, and Discord post refresh after committed assignments.
     return this.prisma.client.$transaction(async (tx) => {
       const data = {
         title: input.title ?? `${ambassador.displayName}'s Table`,
@@ -975,8 +975,9 @@ export class EventsService {
         }
       }
       // TODO(product-feedback): PREFER_PLAYER is stored but not converted into
-      // a seating priority, and preferences cannot yet target campaign,
-      // persistent table, game system, or play category.
+      // seating behavior, and preferences cannot yet target persistent table,
+      // game system, or play category. Campaign continuity currently comes from
+      // RSVP campaignId rather than EventSignupPreference.
     }
 
     // Build a partyKey override for DO_NOT_SPLIT seating groups.

@@ -6,11 +6,57 @@ When this file conflicts with an implementation detail, the implementation is wr
 
 ## 1. Product intent
 
-Artemis is a Discord-first event operations system with a web organizer dashboard. Its job is to help organizers run tabletop roleplaying game events with clear signup flows, reliable capacity management, correct table assignment, private organizer operations, and predictable player-facing communication.
+Artemis is a Discord-first recurring event allocation system with a web organizer dashboard. Its primary job is to derive available player capacity dynamically from the DMs/GMs who volunteer for each event occurrence, apply per-system soft and hard capacities, honor campaign and table preferences, assign compatible players, manage waitlists, and communicate committed status changes reliably.
 
 Artemis must be boring, consistent, and trustworthy. It should avoid surprising players, leaking organizer-only information, over-promising capacity, or requiring organizers to mentally reconcile mismatched Discord and web state.
 
 The acceptable product outcome is not merely that commands run without crashing. The acceptable outcome is that an organizer can create, publish, monitor, assign, adjust, and close an event without hidden state mismatches or public operational noise.
+
+### 1.1 Core allocation model
+
+Dynamic, occurrence-specific allocation is the center of the product.
+
+- Static event seat counts are not the primary source of assignable capacity.
+- A DM/GM contributes player capacity only through a current-occurrence table or DM signup.
+- A DM/GM's contribution depends on the system, category, campaign, table, and capacity they offer for that occurrence.
+- Per-system soft and hard capacity defaults may differ.
+- Soft capacity is the preferred table size; hard capacity is the absolute maximum unless a later product decision explicitly changes those terms.
+- Alternative or backup DM/GM offers must not be double-counted as active capacity.
+- Capacity changes must trigger draft recalculation before lock and committed waitlist or reassignment handling after assignments are released.
+- Waitlisted users are users exceeding compatible hard capacity or users blocked by explicit eligibility, approval, campaign, category, or assignment policy.
+
+### 1.2 Recurring program model
+
+Recurring series are a first-class workflow, not a convenience copy feature.
+
+- Artemis must support weekly and every-other-week recurrence.
+- Artemis must support alternating programs when a series intentionally switches between program types, categories, systems, or formats.
+- Occurrence generation must use the guild-local timezone and preserve the intended local event time.
+- A fresh RSVP is required for every occurrence.
+- Campaign membership, prior attendance, or recurring participation must not reserve a seat for future occurrences without a current-occurrence RSVP.
+- Series configuration must define which settings are copied into generated occurrences, which settings are dynamically inherited, and which settings may be overridden per occurrence.
+- Series-specific channels, roles, eligibility rules, notification policy, assignment defaults, and campaign/table defaults must be representable without raw Discord ID entry for normal administrators.
+- Artemis should automatically create or publish the next needed occurrence according to series policy and announce the next RSVP after an event where configured.
+
+### 1.3 Campaign and persistent table model
+
+Campaigns and mini-arcs persist across event occurrences, but occurrence participation remains explicit.
+
+- Campaigns may carry GM, system, table, expected-session, status, description, and membership or interest data across occurrences.
+- Returning campaign players may receive assignment priority when they RSVP for the current occurrence.
+- Campaign membership or interest alone must not create an RSVP or guarantee a seat.
+- Players may express preference for a campaign, persistent table, GM, game system, play category, or no preference where the program supports those choices.
+- Occurrence-level tables may be generated from persistent campaigns or linked to campaigns, but the active occurrence table remains the assignment target.
+- Campaign completion, cancellation, skipped weeks, GM replacement, player exit, and substitute-player decisions must be auditable lifecycle events.
+
+### 1.4 Configurable program vocabulary
+
+Artemis must distinguish internal behavior from organizer-facing labels.
+
+- Built-in behavioral classes define capacity, assignment, eligibility, attendance, and notification semantics.
+- Series-configurable participation options may expose labels such as apprentice GM, observer, campaign participant, or program-specific custom roles.
+- Configurable options must map onto explicit built-in behavior unless the product intentionally implements fully configurable role behavior.
+- Category sets may be configured per game system or series. Normal, Heroic, and Mixed are default D&D-compatible categories, not the universal product model.
 
 ## 2. Deployment and runtime assumptions
 
@@ -83,7 +129,7 @@ Examples of invalid state:
 - A user is both a player and DM for the same event.
 - A user is both a player and backup DM through an implicit or accidental transition. Player + Backup DM is allowed only when the user intentionally registers backup DM availability.
 - A guest exists without an owning registrant.
-- A heroic-only player is counted as seated at a normal-only table. or vis-versa
+- A heroic-only player is counted as seated at a normal-only table, or vice versa.
 - An event is published twice as if it were two separate publish operations.
 - Assignment status says a player is seated when no compatible capacity exists.
 
@@ -117,14 +163,18 @@ Discord and web must read and mutate the same canonical event state. If Discord 
 
 Every important event property must have one source of truth:
 
+- Series membership and recurrence policy.
 - Event lifecycle status.
 - Published state.
 - Discord message/channel IDs.
 - Registration state.
-- Table capacity.
+- Current occurrence table offers and capacity.
 - Assignment lock time.
 - Assignment result.
+- Assignment revision state.
 - Waitlist status.
+- Campaign/table linkage.
+- Notification delivery state.
 - Attendance status.
 
 ### 4.4 Idempotency is required
@@ -134,8 +184,11 @@ Repeated actions must be safe.
 Required idempotent actions:
 
 - Publish event.
+- Generate series occurrence.
 - Run assignment.
-- Send assignment notification.
+- Recalculate assignment draft.
+- Commit assignment revision.
+- Send committed status-change notification.
 - Rebuild event post.
 - Restart bot.
 - Restart API.
@@ -177,20 +230,37 @@ Unacceptable failure behavior:
 
 ### 5.1 Product roles
 
-Artemis recognizes these event participation roles:
+Artemis recognizes these built-in behavioral classes:
 
 - Organizer
-- DM
-- Backup DM
-- GM
+- Active DM/GM
+- Backup DM/GM availability
 - Player
 - Guest
 
 A Discord user may also have system permissions, but system permission does not automatically make them a participant in an event.
 
+Organizer-facing participation options may be configured per series or program. Those options must map to a built-in behavioral class unless fully configurable role behavior is explicitly implemented for capacity, assignment, eligibility, attendance, and notifications.
+
+Do not add a new hard-coded state-machine role for every new label. Add a hard-coded role only when it creates different product behavior that cannot be represented by a configured option.
+
 ### 5.2 Organizer
 
-Organizers can:
+Organizer permissions are scoped capabilities, not necessarily guild-wide power.
+
+Supported permission scopes should include:
+
+- Owner.
+- Administrator.
+- Event manager.
+- Series/table manager.
+- Assignment-only manager.
+- Attendance-only manager.
+- Settings manager.
+
+A manager for one program, event type, or series must not automatically gain access to unrelated programs or guild-wide settings.
+
+Organizers can, where their scope allows:
 
 - Create events.
 - Edit event details.
@@ -213,13 +283,15 @@ Organizer-only warnings must be private to organizers or shown in web organizer 
 
 DMs & GMs can:
 
-- Register as a DM for an event.
-- Configure table category support.
+- Register as a DM/GM for a specific event occurrence.
+- Configure the system, category, campaign/table offer, and other supported table attributes for that occurrence.
 - Configure table capacity within allowed bounds.
 - Edit their table details before assignment lock unless organizer policy allows later changes.
 - Cancel their DM signup before lock where allowed.
 
 A DM cannot simultaneously be a player for the same event.
+
+Profiles may store default capacities and preferences, but occurrence signup stores the actual offered table. Assignment must use the occurrence offer, not stale profile defaults.
 
 ### 5.4 Backup DM
 
@@ -229,7 +301,7 @@ Backup DMs can:
 
 - Register as available to run an additional table if needed.
 - Remain registered as a player while only on backup availability.
-- Specify table category support and capacity.
+- Specify system, category, campaign/table offer, and capacity where supported.
 - Be promoted into an active DM/table when assignment logic requires another compatible table.
 - Cancel backup availability before lock where allowed.
 
@@ -248,12 +320,12 @@ Default policy:
 Players can:
 
 - Register for an event.
-- Select supported category preferences.
+- Select supported campaign, table, GM, system, category, and no-preference choices where configured.
 - Add, edit, or remove guests within configured limits.
 - Cancel their signup.
 - See whether they are registered, waitlisted, or assigned after assignments are released.
 - Edit preferences before lock where allowed.
-- players should be allowed to add preferances to play with other players or to avoid other players. These selections MUST be done with discord usernames, we should make this a searchable field using guild profiles.
+- Add preferences to play with or avoid other players where configured. These selections must use searchable guild Discord profiles, not raw names or root user profiles.
 
 A player cannot simultaneously be a DM for the same event.
 
@@ -377,6 +449,52 @@ Cancelled events must:
 - Preserve audit history.
 - Avoid deleting canonical historical records.
 
+### 6.11 Recurring series lifecycle
+
+Series must model recurring programs explicitly.
+
+Series configuration must include, where the program needs it:
+
+- Recurrence pattern.
+- Guild-local timezone.
+- Default event duration.
+- Discord publication channel.
+- Event-private thread or role policy.
+- Eligibility rules.
+- Signup windows.
+- Notification policy.
+- Assignment defaults.
+- Campaign/table defaults.
+
+Occurrence generation must be idempotent and safe under retries or multiple workers.
+
+Generated occurrences must have clear inheritance semantics:
+
+- Copied settings are snapshotted onto the occurrence and do not change when the series is edited.
+- Dynamically inherited settings follow the current series configuration until overridden.
+- Occurrence overrides affect only that occurrence unless an organizer explicitly applies the change to future occurrences.
+
+When editing an active series, Artemis must make the scope of the edit explicit: this occurrence only, future occurrences, or the series template where supported.
+
+If a configured Discord channel, role, or member becomes deleted or inaccessible, Artemis must show the configuration as broken, avoid silently redirecting messages, and require organizer repair or an explicit fallback policy.
+
+### 6.12 Campaign lifecycle
+
+Campaigns and mini-arcs must have lifecycle state independent from any single occurrence.
+
+Campaign lifecycle rules must cover:
+
+- Draft/proposed campaign.
+- Active campaign.
+- Completed campaign.
+- Cancelled campaign.
+- Skipped occurrence.
+- GM replacement.
+- Player exit or removal.
+- Substitute player.
+
+Campaign lifecycle changes must be audited. A campaign lifecycle change must not silently rewrite historical occurrence assignments.
+
 ## 7. RSVP state machine
 
 ### 7.1 RSVP state and Backup DM availability
@@ -476,10 +594,15 @@ Players must have a path to mark preferences where preferences affect assignment
 
 At minimum, preferences must support:
 
-- Players they do not wish to be seated with (this should never be exposed to anyone but organizers via the web UI)
-- Players they wish to be seated with (this should never be exposed to anyone but organizers via the web UI)
- - these preferances must be based on real user discord profiles not raw names. Use the guild profile not the root user profiles.
+- Preferred GM where the program offers GM preference.
+- Preferred campaign or persistent table where the program offers campaign/table choice.
+- Preferred game system where the program offers multiple systems.
+- Preferred play category where the program uses categories.
+- No preference.
+- Players they do not wish to be seated with. This must never be exposed to anyone but authorized organizers via the web UI.
+- Players they wish to be seated with. This must never be exposed to anyone but authorized organizers via the web UI.
 
+Player-with-player preferences must use searchable guild Discord profiles, not raw names or root user profiles.
 
 The UI must not imply a preference was captured if it was not persisted.
 
@@ -534,8 +657,7 @@ Capacity UI must not blend unrelated counts in a way that misleads organizers or
 
 Preferred display:
 
-- Player registrations
-  -show CURRENT user profile name, do not store the name present when the user signs up, this should change if they change their profile name.
+- Player registrations with current guild display names where available.
 - Guest registrations
 - Seated participants
 - Seat capacity
@@ -546,17 +668,21 @@ Preferred display:
 
 ### 9.1 Supported categories
 
-The event model currently needs to support at least:
+Category sets are configurable by game system or event series.
+
+The default D&D-compatible category profile is:
 
 - Normal
 - Heroic
 - Mixed
 
-Additional categories may be added later, but the compatibility rules must remain explicit and tested.
+Other programs may use different category sets, such as Legacy, system-specific tiers, or no tier at all. Normal/Heroic/Mixed must not be treated as the universal product model.
+
+Every configured category set must define explicit compatibility behavior and tests.
 
 ### 9.2 Compatibility rules
 
-Default compatibility:
+Default D&D-compatible behavior:
 
 | Participant preference/category | Normal table | Heroic table | Mixed table |
 |---|---:|---:|---:|
@@ -593,7 +719,7 @@ Default expected behavior:
 
 ### 9.5 Minimum viable table size
 
-The product expectation from current discussions is that four or more players may justify pulling a backup DM into a new table. If this threshold changes, it must be configured and tested.
+The default expectation is that four or more compatible waitlisted players may justify pulling a backup DM into a new table. This threshold must be configurable per guild, series, event type, or event policy.
 
 Assignment logic must distinguish between:
 
@@ -604,7 +730,30 @@ Assignment logic must distinguish between:
 
 ## 10. Capacity and waitlist logic
 
-### 10.1 Capacity must be category-aware
+### 10.1 Capacity is DM-derived per occurrence
+
+Assignable player capacity comes from active occurrence table offers.
+
+Rules:
+
+- Static event seat counts may be used for display, planning, or registration caps, but they do not guarantee assignment without compatible active DM/GM capacity.
+- A DM/GM contributes capacity only after signing up or being assigned to run a table for the current occurrence.
+- A backup DM/GM offer contributes proposed capacity only after promotion or organizer-approved activation.
+- A DM/GM who offers multiple alternatives for the same occurrence must not be counted as multiple active tables unless the program explicitly permits one person to run multiple tables.
+- Capacity depends on the offered system, category, campaign/table, soft capacity, hard capacity, and any organizer-approved occurrence override.
+- Capacity changes must update waitlist pressure, assignment drafts, organizer warnings, and committed reassignment/promotion workflows according to event state.
+
+### 10.2 Soft and hard capacity semantics
+
+Default semantics:
+
+- Soft capacity is the preferred table size. Assignment should avoid exceeding it when compatible alternatives exist.
+- Hard capacity is the absolute maximum assigned player count for the active table.
+- Players assigned above soft capacity but at or below hard capacity are still assigned and should be treated as having a seat.
+- Players exceeding compatible hard capacity are waitlisted unless an explicit organizer override changes capacity first.
+- A capacity override that exceeds a DM/GM's configured hard cap must require explicit authorization and audit.
+
+### 10.3 Capacity must be category-aware
 
 Capacity is not just a raw seat count. It is compatible seat capacity.
 
@@ -615,7 +764,7 @@ A participant is seated only if:
 - The table category is compatible or explicitly overridden.
 - Assignment has actually assigned the participant.
 
-### 10.2 Waitlist requirements
+### 10.4 Waitlist requirements
 
 A user must be waitlisted when:
 
@@ -627,7 +776,7 @@ A user must be waitlisted when:
 
 Waitlist state must be visible to organizers and understandable to participants.
 
-### 10.3 Player-facing waitlist messaging
+### 10.5 Player-facing waitlist messaging
 
 When a user is waitlisted, Artemis should tell them privately or through a clear user-facing response:
 
@@ -640,7 +789,7 @@ Example acceptable language:
 
 > You're on the waitlist because there are currently no compatible Heroic seats. If a Heroic or Mixed table opens, Artemis will update your status.
 
-### 10.4 Organizer waitlist visibility
+### 10.6 Organizer waitlist visibility
 
 Organizer UI must show:
 
@@ -654,7 +803,7 @@ Organizer UI must show:
   - Increase capacity.
   - Change event category policy.
 
-### 10.5 Capacity displays
+### 10.7 Capacity displays
 
 Avoid ambiguous displays like `10/6 seats` unless the meaning is obvious and labeled.
 
@@ -683,13 +832,13 @@ Waitlist active: yes
 
 Default expectation:
 
-- Artemis runs an assignment preflight twenty-four hours before event start to surface capacity, category, DM, Backup DM, and guest warnings.
+- Artemis runs an assignment preflight before event start to surface capacity, category, DM, Backup DM, and guest warnings. Twenty-four hours is the default, not a universal constant.
 - Artemis runs the final assignment lock one hour before event start.
 - The final lock time is computed from event start time and event timezone.
-- The preflight time and final lock time must be visible to organizers.
+- The preflight time and final lock time must be configurable where event or series policy requires it and visible to organizers.
 - Scheduled jobs must execute reliably in production.
 
-The twenty-four-hour preflight is a warning and readiness pass. It should not lock ordinary participant changes unless event policy explicitly says so.
+The preflight is a warning and readiness pass. It should not lock ordinary participant changes unless event policy explicitly says so.
 
 The one-hour final lock is the default point where Artemis computes or confirms final assignment state and restricts normal participant changes.
 
@@ -738,14 +887,64 @@ Warnings must never be posted publicly in the player event channel.
 
 ### 11.5 Re-running assignment
 
-Re-running assignment after changes must be controlled.
+Re-running assignment after changes must distinguish draft recalculation from committed assignment revisions.
 
 Default policy:
 
-- Before assignments are released, organizers may re-run assignment.
-- After assignments are released, re-running requires explicit confirmation and must preserve an audit trail.
-- Re-running must not spam duplicate notifications.
-- Re-running must clearly identify changed assignments.
+- Before assignments are released, Artemis may recalculate draft assignments when relevant inputs change.
+- Draft recalculation must not notify players or imply a final player-facing assignment.
+- After assignments are released, any recalculation that changes a user-visible outcome is a committed assignment revision.
+- Committed assignment revisions require explicit policy or organizer confirmation and must preserve an audit trail.
+- Committed revisions must identify changed assignments, displacements, promotions, and waitlist movements.
+- Re-running or recalculating must not spam duplicate notifications.
+
+### 11.6 Recalculation triggers
+
+Artemis must reassess capacity, assignment drafts, or committed revisions when assignment-relevant inputs change.
+
+Relevant triggers include:
+
+- A DM/GM signs up.
+- A DM/GM withdraws.
+- A backup DM/GM is promoted or withdraws.
+- DM/GM capacity, system, category, or campaign/table offer changes.
+- A player RSVPs, cancels, or changes relevant preferences.
+- A guest is added, removed, or changes relevant category/preference.
+- A table is added, removed, locked, or manually protected.
+- Eligibility changes after RSVP.
+- An organizer changes a protected assignment.
+- Event time, registration window, lock time, or cancellation state changes.
+
+Only committed, user-visible changes should trigger user notifications. Intermediate draft recalculation churn must remain invisible to players.
+
+### 11.7 Assignment priority
+
+The default assignment priority order is:
+
+1. Protected manual assignments.
+2. Current-occurrence RSVPs from formal returning campaign members for the matching campaign/table.
+3. Explicit matching campaign, table, or GM preferences.
+4. Party or preferred-player grouping where compatible.
+5. Compatible no-preference players.
+6. Overflow from soft capacity up to hard capacity.
+7. Waitlist.
+
+Assignment priority is still constrained by hard eligibility, explicit avoid-player constraints, table compatibility, and hard capacity.
+
+An eligible player with an explicit matching table, campaign, or GM preference outranks an otherwise equivalent no-preference player unless returning-campaign priority, protected assignment stability, or another explicit policy says otherwise.
+
+Tie-breaking, guest priority, timestamp preservation after edits, and stability after publication must be defined before implementing changes that depend on those details.
+
+### 11.8 Assignment stability
+
+Before assignments are released, Artemis may move draft assignments to improve the overall allocation.
+
+After assignments are released:
+
+- Previously published assignments receive stability priority.
+- A preference edit must not silently displace another assigned player.
+- Displacement, reassignment, promotion, and waitlist movement are committed state changes.
+- Every committed state change must be auditable and notify affected users according to notification policy.
 
 ## 12. Notifications and message visibility
 
@@ -820,7 +1019,24 @@ If a DM fails:
 - Surface it to organizers where appropriate.
 - Provide an alternate public-safe path if needed.
 
-### 12.6 Event-private thread and temporary role
+### 12.6 Committed status-change notifications
+
+Users must be notified of committed, user-visible status changes.
+
+This includes:
+
+- Guaranteed or assigned.
+- Waitlisted.
+- Reassigned.
+- Displaced.
+- Removed.
+- Cancelled.
+- Promoted from backup DM/GM to active DM/GM.
+- A guest status change caused by assignment, cancellation, or capacity change.
+
+Notifications must suppress intermediate draft recalculation states. A user should not receive contradictory messages solely because Artemis explored multiple draft allocations before a committed result.
+
+### 12.7 Event-private thread and temporary role
 
 Artemis may create one private thread or private discussion space for the whole event. This is event-wide, not one thread per table by default.
 
@@ -916,7 +1132,7 @@ Required event dashboard information:
 
 - Event status.
 - Published state.
-- Discord post/channel link or status. Channel ID and human readable name. 
+- Discord post/channel link or status, including human-readable Discord object names where available.
 - Start/end time and timezone.
 - Assignment lock time.
 - Assignment status.
@@ -1031,7 +1247,18 @@ Required signup option controls:
 
 When editing an event that belongs to a series, Artemis must ask whether the change applies only to this event or to future events in the series. If series editing is not implemented, the UI must not imply that it is.
 
-### 14.8 Multiple signup policy
+### 14.8 Discord-backed selectors
+
+Normal administrators should select recognizable Discord objects through live Discord-backed selectors.
+
+Rules:
+
+- Guilds, channels, roles, and members should be selected by name/searchable selector wherever Artemis can query them.
+- Raw Discord snowflake IDs may be displayed for diagnostics, audit, support, and advanced repair, but they should not be the normal configuration input.
+- Deleted, inaccessible, or permission-blocked Discord objects must be shown as broken configuration requiring repair.
+- Artemis must not silently swap a broken Discord object for another destination.
+
+### 14.9 Multiple signup policy
 
 Artemis must not implement generic "multiple signups" as arbitrary duplicate RSVP rows.
 
@@ -1074,19 +1301,29 @@ Schema must support the product model without relying on overloaded text fields.
 
 Required concepts should exist explicitly:
 
+- Event series.
+- Series inheritance/copy/override metadata where needed.
 - Event.
 - Event lifecycle status.
 - Published state and Discord message metadata.
+- Campaign or persistent table where supported.
+- Campaign lifecycle status where supported.
 - User/participant registration.
 - RSVP role.
 - Guest records.
 - Preferences/category.
+- Configurable participation option mappings.
+- Configurable category sets where supported.
 - DM table configuration.
+- Per-system DM/GM capacity defaults.
+- Occurrence-specific DM/GM capacity offer.
 - Backup DM availability.
 - Assignment result.
+- Assignment revision.
 - Assignment warning.
 - Notification delivery record.
 - Event temporary Discord role/thread metadata.
+- Discord sync failure state.
 - Audit event.
 - Job/schedule metadata where needed.
 
@@ -1104,7 +1341,10 @@ Production uses service restarts and PostgreSQL-backed infrastructure. Scheduled
 
 Required jobs:
 
+- Series occurrence generation/publication where applicable.
 - Assignment lock/assignment run.
+- Waitlist promotion/reassignment where applicable.
+- Committed user notification delivery.
 - Event reminder where applicable.
 - Assignment release where applicable.
 - Temporary event role/thread cleanup jobs where applicable.
@@ -1177,7 +1417,7 @@ Audit records should answer:
 
 ### 19.3 Public names
 
-Display names may change. Regularly poll display names for changes.
+Display names may change. Artemis must display current guild names where available without making old display-name snapshots the source of truth.
 
 Store Discord IDs and use display names only for display snapshots.
 
@@ -1193,18 +1433,24 @@ Required domain test coverage:
 - DM cannot sign up as player.
 - Player + Backup DM availability is allowed only through an explicit Backup DM availability action.
 - Promoted Backup DM loses active Player seating eligibility.
+- DM-derived occurrence capacity, including soft and hard capacity behavior.
+- Multi-offer DM capacity not being double-counted.
 - Cancel RSVP.
 - Guest add/edit/remove.
 - Guest limit enforcement.
-- Category compatibility.
+- Configured category compatibility.
 - Heroic player waitlisted when only normal tables exist.
 - Normal player waitlisted when only heroic tables exist.
 - Mixed table compatibility.
 - Backup DM promotion threshold.
 - Capacity display calculations.
+- Campaign returning-player priority.
+- Explicit campaign/table/GM preference priority over equivalent no-preference signups.
 - Assignment result classification.
 - Assignment idempotency.
+- Draft recalculation versus committed assignment revision behavior.
 - Publish idempotency.
+- Series occurrence generation idempotency.
 - Event lifecycle transition validation.
 
 ### 20.2 API tests
@@ -1215,8 +1461,11 @@ Required API test coverage:
 - Invalid actions return safe structured errors.
 - Publish state persists correctly.
 - Guest limits cannot be bypassed.
+- Registration windows cannot be bypassed.
+- Signup-option toggles either enforce behavior or are not exposed as active controls.
 - Assignment status is retrievable.
 - Organizer-only data requires organizer permission.
+- Scoped administration prevents access outside granted guild, series, event, or table scope.
 
 ### 20.3 Bot tests
 
@@ -1230,6 +1479,7 @@ Required bot test coverage:
 - Interaction deferral prevents avoidable "interaction failed" responses.
 - Duplicate publish is prevented.
 - Notification retries do not spam.
+- User notifications are sent only for committed status changes, not draft recalculation churn.
 
 ### 20.4 Web tests
 
@@ -1238,9 +1488,12 @@ Required web test coverage:
 - Published events show as published.
 - Already-published events cannot be double-published.
 - DMs and capacity are visible.
+- Discord-backed selectors are used for ordinary channel, role, and member configuration.
+- Broken Discord objects are visible and require repair.
 - Guest list can be edited.
 - Waitlist is visible.
 - Assignment warnings are private/organizer-only.
+- Series edit scope is explicit.
 - Completed events become appropriately restricted.
 
 ### 20.5 Production smoke tests
@@ -1257,6 +1510,7 @@ Before considering a deploy acceptable:
 - Publish state matches between Discord and web.
 - RSVP role exclusivity works.
 - Assignment job registration is visible.
+- Series generation and committed notification jobs are visible where enabled.
 
 ## 21. Manual QA scenarios
 
@@ -1331,7 +1585,35 @@ Expected outcome: Artemis proposes or performs backup DM promotion according to 
 
 Expected outcome: assignment runs once, persists result, and exposes warnings privately.
 
-### 21.9 Publish idempotency
+### 21.9 Dynamic capacity
+
+1. Create an occurrence with no active DM/GM table.
+2. Register players.
+3. Add a DM/GM table offer with soft capacity below hard capacity.
+4. Add more compatible players than hard capacity.
+5. Run assignment.
+
+Expected outcome: Artemis derives assignable seats from the active table offer, treats above-soft but at-or-below-hard assignments as seated, and waitlists users beyond compatible hard capacity.
+
+### 21.10 Series generation
+
+1. Create a weekly or every-other-week series in a guild-local timezone.
+2. Generate occurrences.
+3. Trigger generation again.
+4. Edit one occurrence only.
+
+Expected outcome: generated dates preserve local time, duplicate occurrences are not created, and occurrence-only edits do not silently rewrite the series template.
+
+### 21.11 Campaign continuity
+
+1. Create or select a campaign with returning players.
+2. Generate a new occurrence.
+3. Have returning and non-returning players RSVP.
+4. Run assignment against a campaign-linked table.
+
+Expected outcome: only current-occurrence RSVPs are considered, returning campaign players receive configured priority, and campaign membership alone does not reserve seats.
+
+### 21.12 Publish idempotency
 
 1. Publish from Discord command.
 2. Open web UI.
@@ -1339,7 +1621,7 @@ Expected outcome: assignment runs once, persists result, and exposes warnings pr
 
 Expected outcome: web shows already published and does not create duplicate public post.
 
-### 21.10 Event end
+### 21.13 Event end
 
 1. Let event pass end time.
 2. Try player signup/cancel/edit.
@@ -1357,6 +1639,7 @@ A P0 blocks production release or requires immediate production mitigation.
 Examples:
 
 - Assignment does not run at lock time.
+- Dynamic capacity is computed from stale or double-counted DM/GM offers.
 - Public channel receives internal error or organizer warning.
 - Invalid seating/capacity result.
 - RSVP role exclusivity violation.
@@ -1371,10 +1654,10 @@ A P1 blocks a complete v1 experience but may not require immediate rollback if m
 
 Examples:
 
-- Missing backup DM signup.
-- Missing cancel RSVP UI.
-- Missing guest edit UI.
-- Web lacks DM/capacity visibility.
+- Missing or incomplete series occurrence generation where recurrence is required.
+- Missing campaign/table/GM preference behavior where assignment depends on it.
+- Missing automatic waitlist promotion or committed reassignment handling.
+- Missing scoped administration for a deployed multi-program guild.
 - Waitlist messaging incomplete.
 - Assignment warnings not clear enough.
 - Preferences missing where assignment depends on them.
@@ -1425,63 +1708,38 @@ Before changing Artemis:
 
 If a requested implementation conflicts with this file, stop and flag the conflict instead of coding around it.
 
-## 25. Current known gaps to close
+## 25. Production-ready outcome
 
-The following gaps are known from manual testing and should be treated as active remediation targets:
+Artemis should be described as production-ready when:
 
-- Event creation failure is visible publicly instead of ephemeral/private.
-- Backup DM signup option is missing.
-- DM can also sign up as player.
-- Organizer warnings are posted publicly.
-- Player preference options are missing.
-- Heroic players can appear seated despite no heroic/mixed table capacity.
-- Web UI can show an event as unpublished after Discord publish.
-- Web UI lacks visibility into DMs, their capacity, and table details.
-- Guest list editing is unclear or unavailable.
-- Cancel signup flow is unclear or broken.
-- Guest registration can exceed allowed count.
-- Guest registration relies too much on open text.
-- Assignment did not run one hour before event.
-- Waitlist messages/alerts are missing or insufficient.
-- Capacity display can show misleading values such as over-capacity without clear waitlist/category explanation.
-- UI allows double publish from web.
-
-These are not isolated bugs. They indicate that RSVP state, capacity/category assignment, notification privacy, and cross-surface canonical state need hardening.
-
-## 26. Preferred remediation order
-
-Fix in this order:
-
-1. Public/private message boundary.
-2. RSVP role exclusivity and cancel behavior.
-3. Structured guest model and guest limits.
-4. Backup DM first-class signup.
-5. Category-aware capacity and waitlist logic.
-6. Assignment scheduling and idempotency.
-7. Publish idempotency and web/Discord state sync.
-8. Web organizer visibility for DMs, guests, capacity, waitlist, and warnings.
-9. Player preferences.
-10. UX polish.
-
-This order protects trust and data correctness before convenience.
-
-## 27. Acceptable v1 outcome
-
-A v1 Artemis release is acceptable when:
-
-- Organizers can create and publish events without duplicate posts or public failures.
-- Players can sign up, cancel, manage guests, and understand their status.
-- DMs and backup DMs have distinct, exclusive flows.
-- Guest limits are enforced.
-- Category preferences affect assignment correctly.
-- Incompatible players are waitlisted rather than falsely seated.
-- Assignment runs at the configured lock time.
-- Assignment results are persisted and visible to organizers.
-- Player-facing assignment/waitlist messaging is clear.
-- Organizer warnings are private.
-- Web and Discord show the same canonical event state.
+- Capacity is derived from current-occurrence DM/GM offers with correct
+  per-system soft/hard capacity handling and no double-counted alternative
+  offers.
+- Organizers can create, publish, edit, cancel, and generate recurring events
+  without duplicate posts, stale controls, or unclear failure state.
+- Recurring series generate correct guild-local occurrences, preserve explicit
+  copy/inheritance/override semantics, and expose broken Discord object
+  configuration for repair.
+- Players can RSVP, cancel, manage guests, set supported preferences, and
+  understand whether they are registered, assigned, waitlisted, cancelled, or
+  removed.
+- DMs and backup DMs have distinct, exclusive, eligibility-aware flows.
+- Registration windows, guest limits, and event-type signup options are enforced
+  by domain/API behavior, not only UI copy.
+- Campaigns and mini-arcs persist across occurrences while still requiring a
+  fresh RSVP for every occurrence.
+- Assignment runs at lock time, respects category/capacity/campaign/preference
+  rules, persists explainable results, and notifies affected users reliably.
+- Waitlist, reassignment, cancellation, and rescheduling outcomes are consistent
+  across Discord, dashboard, audit logs, and notifications.
+- Scoped administration prevents managers from affecting unrelated programs,
+  events, series, tables, attendance, or settings.
+- Discord publication, role, thread, and DM failures are visible to staff with
+  retry or reconciliation paths.
 - Deployment follows the production script successfully.
 - `/ops check` passes after deploy.
-- Manual QA scenarios in this file pass.
+- End-to-end QA scenarios for the main workflows pass.
 
-If these conditions are not met, the project may still be useful for internal testing, but it should not be described as production-ready.
+If these conditions are not met, the project may still be useful for controlled
+operations or internal testing, but it should not be described as fully
+production-ready.
