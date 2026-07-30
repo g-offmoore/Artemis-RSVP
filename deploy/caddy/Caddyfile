@@ -7,8 +7,15 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
-	@metrics path /metrics
-	respond @metrics 404
+	# /metrics must never be public (docs/SECURITY.md). This has to be a `handle` block,
+	# not a bare `respond` directive: Caddy sorts bare directives by its own default
+	# precedence rather than file order, so a bare `respond` sitting next to `handle`
+	# blocks is not guaranteed to run before the catch-all `handle {}` below swallows the
+	# request into the web proxy. `handle` blocks are evaluated in file order, first
+	# match wins, which is what we actually need here.
+	handle /metrics {
+		respond 404
+	}
 
 	handle /healthz {
 		reverse_proxy api:3000

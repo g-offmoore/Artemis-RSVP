@@ -89,13 +89,65 @@ export const signupRoleSchema = z.enum([
 ]);
 export type SignupRole = z.infer<typeof signupRoleSchema>;
 
+// Signup-option overrides for an event's or series' own dedicated EventType copy
+// (see rules.md "profiles store defaults, events store decisions" — applied here to
+// event-type config too, not just ambassador defaults). Every event/series gets its
+// own independent row; editing one never affects another.
+export const eventTypeOverridesSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    requiresRsvp: z.boolean().default(true),
+    allowsGuests: z.boolean().default(true),
+    maxGuestsPerRsvp: z.number().int().min(0).max(20).default(3),
+    requiresAmbassadors: z.boolean().default(true),
+    requiresTableAssignment: z.boolean().default(true),
+    usesPlayerCategories: z.boolean().default(true),
+    createsTemporaryRoles: z.boolean().default(true),
+    requiresAttendanceConfirmation: z.boolean().default(true),
+    sendsFeedbackPrompts: z.boolean().default(true),
+    usesWaitlist: z.boolean().default(true),
+    allowsNameOnlyWalkIns: z.boolean().default(true),
+  })
+  .default({
+    requiresRsvp: true,
+    allowsGuests: true,
+    maxGuestsPerRsvp: 3,
+    requiresAmbassadors: true,
+    requiresTableAssignment: true,
+    usesPlayerCategories: true,
+    createsTemporaryRoles: true,
+    requiresAttendanceConfirmation: true,
+    sendsFeedbackPrompts: true,
+    usesWaitlist: true,
+    allowsNameOnlyWalkIns: true,
+  });
+export type EventTypeOverrides = z.infer<typeof eventTypeOverridesSchema>;
+
+// For PATCH-style edits to an existing event's/series' EventType: every field
+// optional, no defaults forced (omitted fields are left untouched).
+export const eventTypeUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  requiresRsvp: z.boolean().optional(),
+  allowsGuests: z.boolean().optional(),
+  maxGuestsPerRsvp: z.number().int().min(0).max(20).optional(),
+  requiresAmbassadors: z.boolean().optional(),
+  requiresTableAssignment: z.boolean().optional(),
+  usesPlayerCategories: z.boolean().optional(),
+  createsTemporaryRoles: z.boolean().optional(),
+  requiresAttendanceConfirmation: z.boolean().optional(),
+  sendsFeedbackPrompts: z.boolean().optional(),
+  usesWaitlist: z.boolean().optional(),
+  allowsNameOnlyWalkIns: z.boolean().optional(),
+});
+export type EventTypeUpdateInput = z.infer<typeof eventTypeUpdateSchema>;
+
 export const eventCreateSchema = z.object({
   guildId: z.string().min(1),
   channelId: z.string().min(1),
   title: z.string().trim().min(1).max(120),
   description: trimmedOptionalString(2000),
   imageUrl: optionalImageUrlString,
-  eventTypeKey: z.string().trim().min(1).default("dnd_session_night"),
+  eventType: eventTypeOverridesSchema,
   gameSystem: z.string().trim().min(1).default("D&D"),
   startAt: eventDateSchema,
   endAt: eventDateSchema,
@@ -287,14 +339,15 @@ const weekdaySchema = z.enum(["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]);
 
 export const eventSeriesCreateSchema = z.object({
   guildId: z.string().min(1),
-  eventTypeKey: z.string().trim().min(1).default("dnd_session_night"),
+  eventType: eventTypeOverridesSchema,
   name: z.string().trim().min(1).max(120),
   defaultChannelId: z.string().min(1),
   recurrenceRule: z
     .string()
-    // TODO(product-feedback): Add biweekly and alternating-program recurrence
-    // rules, not only weekly templates.
-    .regex(/^WEEKLY:(MON|TUE|WED|THU|FRI|SAT|SUN)$/, "Only WEEKLY:<DAY> is supported, e.g. WEEKLY:FRI"),
+    .regex(
+      /^WEEKLY:(MON|TUE|WED|THU|FRI|SAT|SUN)(:[12])?$/,
+      "Only WEEKLY:<DAY> or WEEKLY:<DAY>:2 (biweekly) is supported, e.g. WEEKLY:FRI or WEEKLY:FRI:2",
+    ),
   signupOpenHoursBefore: z.number().int().min(1).default(168),
   signupCloseHoursBefore: z.number().int().min(0).default(1),
   defaultRoleCleanupDays: z.number().int().min(1).default(7),
@@ -317,6 +370,46 @@ export type SeriesGenerateInput = z.infer<typeof seriesGenerateSchema>;
 export const WEEKDAY_TO_JS: Record<string, number> = {
   SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6,
 };
+
+export type WeeklyRecurrence = { weekday: string; intervalWeeks: 1 | 2 };
+
+/** Single source of truth for parsing "WEEKLY:<DAY>" / "WEEKLY:<DAY>:2" — do not re-split this string elsewhere. */
+export function parseRecurrenceRule(rule: string): WeeklyRecurrence {
+  const match = /^WEEKLY:(MON|TUE|WED|THU|FRI|SAT|SUN)(?::([12]))?$/.exec(rule);
+  if (!match) throw new Error(`Invalid recurrenceRule: ${rule}`);
+  return {
+    weekday: match[1],
+    intervalWeeks: match[2] === "2" ? 2 : 1,
+  };
+}
+
+export function formatRecurrenceRule(value: WeeklyRecurrence): string {
+  return value.intervalWeeks === 2 ? `WEEKLY:${value.weekday}:2` : `WEEKLY:${value.weekday}`;
+}
+
+/**
+ * Whole calendar days between two instants as they appear in `tz`, ignoring
+ * time-of-day. Built from Date.UTC() of the y/m/d parts only (no real-time
+ * component), so DST transitions in `tz` can't shift the result — a plain
+ * `(b.getTime() - a.getTime()) / 86400000` would be off by an hour across a
+ * spring-forward/fall-back boundary.
+ */
+export function calendarDaysBetweenInTimezone(a: Date, b: Date, tz: string): number {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const toUtcDateOnly = (date: Date) => {
+    const parts = fmt.formatToParts(date);
+    const year = parseInt(parts.find((p) => p.type === "year")!.value, 10);
+    const month = parseInt(parts.find((p) => p.type === "month")!.value, 10);
+    const day = parseInt(parts.find((p) => p.type === "day")!.value, 10);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((toUtcDateOnly(b) - toUtcDateOnly(a)) / (24 * 60 * 60 * 1000));
+}
 
 export function nextWeekdayDate(from: Date, targetDay: number): Date {
   const date = new Date(from);
@@ -830,6 +923,7 @@ const ianaTimezoneSchema = z
   }, "Use a valid IANA timezone like America/New_York or America/Chicago.");
 
 export const guildSettingsUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
   defaultTimezone: ianaTimezoneSchema.optional(),
   defaultEventChannelId: z
     .preprocess(emptyStringToUndefined, z.string().min(1).optional())

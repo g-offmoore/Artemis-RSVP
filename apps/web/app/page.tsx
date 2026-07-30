@@ -11,6 +11,7 @@ import {
   artemisApi,
   EventSummary,
   GuildSettings,
+  GuildSummary,
 } from "../src/lib/artemis-api";
 import { guildAccessMessage, requireSession } from "../src/lib/auth";
 import { EventCreateForm } from "./event-create-form";
@@ -18,13 +19,19 @@ import { EventCreateForm } from "./event-create-form";
 export default async function DashboardPage() {
   const session = await requireSession();
   const guildId = session.activeGuildId;
-  const [events, settings] = await Promise.all([
+  const [events, settings, allGuilds] = await Promise.all([
     artemisApi<EventSummary[]>(`/api/v1/events?guildId=${guildId}`, { guildId }),
     artemisApi<GuildSettings>(
       `/api/v1/guild-settings?guildId=${guildId}`,
       { guildId },
     ).catch(() => null),
+    artemisApi<GuildSummary[]>("/api/v1/guilds").catch(() => [] as GuildSummary[]),
   ]);
+
+  // Filter guild directory to only guilds this session is authorized to create events in.
+  const authorizedGuilds = session.isPlatformAdmin
+    ? allGuilds
+    : allGuilds.filter((g) => session.guilds.some((sg) => sg.guildId === g.guildId));
 
   const roleAccessMessage = guildAccessMessage(settings);
 
@@ -123,16 +130,17 @@ export default async function DashboardPage() {
       >
         <div id="create-event" style={{ flex: 1, minWidth: "18rem" }}>
           <EventCreateForm
+            defaultGuildId={guildId}
             defaultChannelId={
               settings?.defaultEventChannelId ??
               process.env.DISCORD_EVENT_CHANNEL_ID
             }
-            guildDefaultChannelId={settings?.defaultEventChannelId ?? process.env.DISCORD_EVENT_CHANNEL_ID}
             defaultTimezone={
               settings?.defaultTimezone ??
               process.env.ARTEMIS_EVENT_TIME_ZONE ??
               "America/New_York"
             }
+            authorizedGuilds={authorizedGuilds}
           />
         </div>
         <aside

@@ -122,7 +122,7 @@ export class ArtemisApi {
     );
   }
 
-  /** Onboard a newly-joined guild: seeds GuildSettings + default event types. */
+  /** Onboard a newly-joined guild: ensures a GuildSettings row exists. */
   async onboardGuild(guildId: string) {
     return this.request(`/api/v1/guilds/${encodeURIComponent(guildId)}/onboard`, {
       method: "POST",

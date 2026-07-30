@@ -172,6 +172,10 @@ enum PreferenceStrength {
 model GuildSettings {
   id                       String   @id @default(cuid())
   guildId                  String   @unique
+  // Discord guild display name, kept current by the bot on join/startup so the
+  // web dashboard's guild picker can show human-readable names without a live
+  // per-request Discord call. Nullable: unset until the bot's first onboarding.
+  name                     String?
   defaultTimezone          String   @default("America/New_York")
   staffRoleIds             String[] @default([])
   adminRoleIds             String[] @default([])
@@ -226,9 +230,14 @@ model EventSeries {
   eventType              EventType @relation(fields: [eventTypeId], references: [id])
   name                   String
   defaultChannelId       String
-  // recurrenceRule stores a simple weekly schedule: "WEEKLY:MON", "WEEKLY:FRI", etc.
-  // Only WEEKLY is supported in v1; other frequencies must be labeled unsupported.
+  // recurrenceRule stores a simple weekly schedule: "WEEKLY:MON", "WEEKLY:FRI", or
+  // "WEEKLY:FRI:2" for biweekly. Only WEEKLY is supported in v1.
   recurrenceRule         String
+  // Anchor date for interval parity (biweekly = every other week from this date).
+  // Set once when the first occurrence is generated and never re-derived from
+  // child events afterward, so deleting/rescheduling an occurrence can't shift
+  // the cadence of the rest of the series.
+  recurrenceAnchorAt     DateTime?
   signupOpenHoursBefore  Int       @default(168)
   signupCloseHoursBefore Int       @default(1)
   defaultRoleCleanupDays Int       @default(7)

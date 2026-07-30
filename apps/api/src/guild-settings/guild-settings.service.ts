@@ -28,10 +28,10 @@ export class GuildSettingsService {
     });
   }
 
-  async listManagedGuildIds(): Promise<string[]> {
-    const rows = await this.prisma.client.guildSettings.findMany({
-      select: { guildId: true },
+  async listManagedGuilds(): Promise<{ guildId: string; name: string | null }[]> {
+    return this.prisma.client.guildSettings.findMany({
+      select: { guildId: true, name: true },
+      orderBy: { guildId: "asc" },
     });
-    return rows.map((row) => row.guildId);
   }
 }

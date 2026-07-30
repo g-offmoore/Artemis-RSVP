@@ -13,6 +13,7 @@ import { EditEventForm } from "./edit-event-form";
 import { EligibilityRulesPanel } from "./eligibility-rules-panel";
 import { EventManagement } from "./event-management";
 import { ParticipantsPanel } from "./participants-panel";
+import { SignupOptionsPanel } from "./signup-options-panel";
 
 function toDateInputValue(isoString: string, timeZone: string) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -270,6 +271,10 @@ export default async function EventPage({
         rules={event.eligibilityRules ?? []}
         settings={settings}
       />
+
+      {event.eventType && (
+        <SignupOptionsPanel eventId={event.id} current={event.eventType} />
+      )}
 
       {preferences.length > 0 && (
         <>

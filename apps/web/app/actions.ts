@@ -23,7 +23,13 @@ export async function createEventAction(
   formData: FormData,
 ): Promise<ActionState> {
   const session = await requireSession();
-  const guildId = session.activeGuildId;
+
+  // Accept an explicit guildId from the form (new guild picker) but validate it
+  // server-side — never trust the client to assert which guilds the user may write to.
+  const submittedGuildId = valueOf(formData, "guildId");
+  const guildId = resolveAuthorizedGuildId(session, submittedGuildId);
+  if (!guildId) return { ok: false, message: "Not authorized for that guild." };
+
   const channelId =
     valueOf(formData, "channelId") || process.env.DISCORD_EVENT_CHANNEL_ID;
   let eventId = "";
@@ -31,7 +37,7 @@ export async function createEventAction(
   if (!channelId)
     return {
       ok: false,
-      message: "Set DISCORD_EVENT_CHANNEL_ID or enter a channel ID.",
+      message: "Select a channel or set DISCORD_EVENT_CHANNEL_ID.",
     };
 
   try {
@@ -63,6 +69,7 @@ export async function createEventAction(
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
         createdByDiscordId: session.discordUserId,
+        eventType: buildEventTypeOverrides(formData),
       },
     });
     eventId = event.id;
@@ -85,6 +92,68 @@ export async function createEventAction(
 
   revalidatePath("/");
   redirect(`/events/${eventId}`);
+}
+
+export async function createRecurringEventAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+
+  const submittedGuildId = valueOf(formData, "guildId");
+  const guildId = resolveAuthorizedGuildId(session, submittedGuildId);
+  if (!guildId) return { ok: false, message: "Not authorized for that guild." };
+
+  const channelId =
+    valueOf(formData, "channelId") || process.env.DISCORD_EVENT_CHANNEL_ID;
+  if (!channelId) return { ok: false, message: "Select a channel or set DISCORD_EVENT_CHANNEL_ID." };
+
+  const weekday = valueOf(formData, "weekday") || "FRI";
+  const intervalWeeks = valueOf(formData, "intervalWeeks") === "2" ? 2 : 1;
+  const recurrenceRule = intervalWeeks === 2 ? `WEEKLY:${weekday}:2` : `WEEKLY:${weekday}`;
+
+  let seriesId: string;
+  try {
+    const series = await artemisApi<{ id: string }>("/api/v1/series", {
+      method: "POST",
+      guildId,
+      body: {
+        guildId,
+        name: valueOf(formData, "title"),
+        defaultChannelId: channelId,
+        recurrenceRule,
+        defaultGameSystem: valueOf(formData, "gameSystem") || "D&D",
+        defaultStartHour: parseInt(valueOf(formData, "startTime").split(":")[0] ?? "18", 10),
+        defaultStartMinute: parseInt(valueOf(formData, "startTime").split(":")[1] ?? "0", 10),
+        defaultDurationMinutes: parseInt(valueOf(formData, "durationMinutes") || "240", 10),
+        defaultDescription: optionalValueOf(formData, "description"),
+        defaultImageUrl: optionalValueOf(formData, "imageUrl"),
+        createdByDiscordId: session.discordUserId,
+        eventType: buildEventTypeOverrides(formData),
+      },
+    });
+    seriesId = series.id;
+
+    // Generate + publish the first occurrence so "create recurring event" is as
+    // quick as creating a one-off — the series page handles future generation.
+    const generated = await artemisApi<{ events: Array<{ id: string }> }>(
+      `/api/v1/series/${seriesId}/generate`,
+      { method: "POST", guildId, body: { count: 1 } },
+    );
+    if (generated.events[0]) {
+      await artemisApi(`/api/v1/events/${generated.events[0].id}/publish`, {
+        method: "POST",
+        guildId,
+        body: { actorDiscordId: session.discordUserId },
+      });
+    }
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/series");
+  redirect(`/series/${seriesId}`);
 }
 
 export async function updateEventAction(
@@ -598,6 +667,48 @@ export async function createTableAction(
   }
 }
 
+export async function updateEventTypeAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+
+  try {
+    await artemisApi(`/api/v1/events/${eventId}/event-type`, {
+      method: "PATCH",
+      guildId: session.activeGuildId,
+      body: buildEventTypeOverrides(formData),
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/events/${eventId}`);
+  return { ok: true, message: "Signup options updated." };
+}
+
+export async function updateSeriesEventTypeAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const seriesId = valueOf(formData, "seriesId");
+
+  try {
+    await artemisApi(`/api/v1/series/${seriesId}/event-type`, {
+      method: "PATCH",
+      guildId: session.activeGuildId,
+      body: buildEventTypeOverrides(formData),
+    });
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+
+  revalidatePath(`/series/${seriesId}`);
+  return { ok: true, message: "Series signup options updated." };
+}
+
 function valueOf(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
@@ -606,6 +717,39 @@ function valueOf(formData: FormData, key: string) {
 function optionalValueOf(formData: FormData, key: string) {
   const value = valueOf(formData, key);
   return value || undefined;
+}
+
+function buildEventTypeOverrides(formData: FormData) {
+  // A sentinel field marks that the signup-options section was submitted.
+  // Unchecked checkboxes don't appear in FormData, so without the sentinel
+  // we can't distinguish "user left it unchecked" from "section not shown".
+  if (!formData.has("_signupOptionsSubmitted")) return undefined;
+
+  const checked = (key: string) => formData.get(key) !== null;
+  return {
+    name: optionalValueOf(formData, "eventTypeName"),
+    requiresRsvp: checked("requiresRsvp"),
+    allowsGuests: checked("allowsGuests"),
+    maxGuestsPerRsvp: parseInt(valueOf(formData, "maxGuestsPerRsvp") || "3", 10),
+    requiresAmbassadors: checked("requiresAmbassadors"),
+    requiresTableAssignment: checked("requiresTableAssignment"),
+    usesPlayerCategories: checked("usesPlayerCategories"),
+    createsTemporaryRoles: checked("createsTemporaryRoles"),
+    requiresAttendanceConfirmation: checked("requiresAttendanceConfirmation"),
+    sendsFeedbackPrompts: checked("sendsFeedbackPrompts"),
+    usesWaitlist: checked("usesWaitlist"),
+    allowsNameOnlyWalkIns: checked("allowsNameOnlyWalkIns"),
+  };
+}
+
+function resolveAuthorizedGuildId(
+  session: { activeGuildId: string; isPlatformAdmin: boolean; guilds: Array<{ guildId: string }> },
+  submittedGuildId: string,
+): string | null {
+  if (!submittedGuildId) return session.activeGuildId;
+  if (session.isPlatformAdmin) return submittedGuildId;
+  if (session.guilds.some((g) => g.guildId === submittedGuildId)) return submittedGuildId;
+  return null;
 }
 
 function actionErrorMessage(error: unknown) {

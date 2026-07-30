@@ -7,6 +7,7 @@ import {
 } from "../../../src/lib/artemis-api";
 import { requireSession } from "../../../src/lib/auth";
 import { GenerateOccurrencesForm } from "./generate-form";
+import { SeriesSignupOptionsPanel } from "./signup-options-panel";
 
 const WEEKDAY_LABELS: Record<string, string> = {
   MON: "Monday",
@@ -96,7 +97,7 @@ export default async function SeriesDetailPage({
           <div>
             <h2 id="generate-heading">Generate Occurrences</h2>
             <p className="muted">
-              Creates the next N weekly events starting after the last generated
+              Creates the next N events starting after the last generated
               occurrence. Each generated event uses the series defaults and can
               be individually edited.
             </p>
@@ -104,6 +105,10 @@ export default async function SeriesDetailPage({
         </div>
         <GenerateOccurrencesForm seriesId={series.id} />
       </section>
+
+      {series.eventType && (
+        <SeriesSignupOptionsPanel seriesId={series.id} current={series.eventType} />
+      )}
 
       <h2>Upcoming Events in This Series</h2>
       {upcomingEvents.length === 0 ? (

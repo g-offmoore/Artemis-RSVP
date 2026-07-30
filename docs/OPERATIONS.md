@@ -44,32 +44,43 @@ Optional URLs such as `DISCORD_OPS_WEBHOOK_URL` may be blank; the API and bot no
 
 ## Nanode Deployment Sequence
 
-Use `scripts/deploy-nanode.sh` on the host. It defaults to `/opt/artemis` and `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
+Use `scripts/deploy-nanode.sh` on the host. It runs from `/opt/artemis/repo` against `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
 
-1. Validate Compose configuration with the production env file.
-2. Build images on the host.
-3. Run the migration one-shot.
-4. Restart API.
-5. Health-check API `/readyz`.
-6. Restart web.
-7. Health-check web `/api/healthz`.
-8. Restart Caddy.
-9. Restart bot last after API is healthy.
-10. Verify bot gateway connection and command health.
-11. Prune old images after successful deployment.
+1. Show current container status.
+2. Refuse to proceed if the Git working tree is dirty.
+3. Pull with `git pull --ff-only`.
+4. Render Compose config and fail if any `${...}` variable is unresolved.
+5. Build images with the `migrate` profile (this also builds api/web/bot, since they have no `profiles:` restriction).
+6. Run the migration one-shot.
+7. Restart API with `--force-recreate`; fail and dump logs if it doesn't report `healthy` via Docker's own health status.
+8. Restart web with `--force-recreate`; same health-status gate.
+9. Restart Caddy with `--force-recreate`.
+10. Restart bot with `--force-recreate`; fail and dump logs if the container isn't in the `running` state after a short grace period (bot has no Docker `HEALTHCHECK` defined, so this checks container state rather than health status).
+11. Show final service status, `docker stats`, memory, and disk usage.
+12. Reminder to run `/ops check` in Discord.
+
+Every restart step uses `--force-recreate`, not a bare `up -d`. A bare `up -d` only recreates a container if Compose's own heuristic detects a config/image change — on 2026-07-30 this silently left `web`/`bot`/`caddy` running two-month-old images after what looked like a successful deploy, because the health checks that followed couldn't tell a freshly-recreated container apart from one that was never touched. `--force-recreate` removes that ambiguity entirely.
 
 Equivalent manual commands:
 
 ```bash
-cd /opt/artemis
-docker compose --env-file /etc/artemis/production.env config
-docker compose --env-file /etc/artemis/production.env build
-docker compose --env-file /etc/artemis/production.env --profile migrate run --rm migrate
-docker compose --env-file /etc/artemis/production.env up -d api
-docker compose --env-file /etc/artemis/production.env exec -T api node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-docker compose --env-file /etc/artemis/production.env up -d web caddy bot
-docker compose --env-file /etc/artemis/production.env ps
+cd /opt/artemis/repo
+DC="docker compose --env-file /etc/artemis/production.env"
+$DC config | grep '${' && echo "unresolved vars, stop" # should print nothing
+$DC --profile migrate build
+$DC --profile migrate run --rm migrate
+$DC up -d --force-recreate api
+docker inspect --format '{{.State.Health.Status}}' "$($DC ps -q api)"
+$DC up -d --force-recreate web
+docker inspect --format '{{.State.Health.Status}}' "$($DC ps -q web)"
+$DC up -d --force-recreate caddy
+$DC up -d --force-recreate bot
+$DC ps
 ```
+
+To confirm a service actually got a new container (not just "healthy," which a stale container also reports), compare `docker compose ps` output before and after — the `CREATED` column should read "seconds ago," not weeks.
+
+Never write `docker compose config` output to a file on the host — it resolves every `${...}` reference inline, including `DATABASE_URL`, `DISCORD_TOKEN`, `SESSION_SECRET`, and every other secret. Pipe it directly into whatever check needs it instead of persisting it to disk.
 
 Before deploying from a workstation or CI runner, run the Docker smoke path with placeholder env values:
 
