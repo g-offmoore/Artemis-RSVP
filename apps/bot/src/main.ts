@@ -735,11 +735,19 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (parsed.action === "accept") {
-      await api.backupDmAction(parsed.eventId, {
+      const result = await api.backupDmAction(parsed.eventId, {
         actorDiscordId: interaction.user.id,
         participantId: parsed.participantId,
         action: "pull",
-      });
+      }) as { alreadySettled?: boolean; slotAlreadyFilled?: boolean };
+
+      if (result?.slotAlreadyFilled || result?.alreadySettled) {
+        await interaction.editReply({
+          content:
+            "Another backup DM already accepted before you — the slot is filled. Your player RSVP is unchanged. Thank you for being willing to step up!",
+        });
+        return;
+      }
 
       await interaction.editReply({
         content:

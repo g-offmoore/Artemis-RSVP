@@ -1293,11 +1293,60 @@ export class EventsService {
       throw new BadRequestException("Participant is not a backup DM");
     }
 
+    // Idempotency guard: if this participant is already in a terminal backup DM state,
+    // return the current state without re-running the pull/decline logic.
+    const terminalStatuses = ["BACKUP_PULLED_TO_DM", "BACKUP_DECLINED_PULL", "BACKUP_RELEASED_AS_PLAYER"];
+    if (participant.backupDmStatus && terminalStatuses.includes(participant.backupDmStatus)) {
+      return {
+        ok: true,
+        participantId: participant.id,
+        backupDmStatus: participant.backupDmStatus,
+        alreadySettled: true,
+      };
+    }
+
     return this.prisma.client.$transaction(async (tx) => {
       let newStatus: string;
       let auditAction: string;
 
       if (input.action === "pull") {
+        // Multi-offer: check if another backup DM already covered the shortage.
+        // If a BACKUP_PULLED_TO_DM participant already exists for this event,
+        // auto-decline this accept so we don't pull more DMs than needed.
+        const alreadyPulledCount = await tx.eventParticipant.count({
+          where: {
+            eventId,
+            signupRole: "BACKUP_DM",
+            backupDmStatus: "BACKUP_PULLED_TO_DM",
+            id: { not: participant.id },
+          },
+        });
+        // Count active (non-cancelled) DM tables to determine if the shortage is filled.
+        const activeTableCount = await tx.eventTable.count({
+          where: { eventId, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+        });
+        // If there are already as many pulled DMs as there are DM tables (or more),
+        // the shortage is covered — auto-decline rather than pull.
+        if (alreadyPulledCount > 0 && alreadyPulledCount >= activeTableCount) {
+          newStatus = "BACKUP_DECLINED_PULL";
+          auditAction = "backup_dm.declined";
+          await tx.eventParticipant.update({
+            where: { id: participant.id },
+            data: { backupDmStatus: "BACKUP_DECLINED_PULL" },
+          });
+          await tx.auditLog.create({
+            data: {
+              guildId: event.guildId,
+              eventId,
+              actorDiscordId: input.actorDiscordId,
+              action: auditAction,
+              reasonCode: "slot_filled",
+              afterValue: { participantId: participant.id, backupDmStatus: newStatus, reason: "DM slot already filled by another backup" },
+            },
+          });
+          return { ok: true, participantId: participant.id, backupDmStatus: newStatus, slotAlreadyFilled: true };
+        }
+
         newStatus = "BACKUP_PULLED_TO_DM";
         auditAction = "backup_dm.pulled";
 
