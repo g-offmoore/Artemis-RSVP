@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -14,7 +13,6 @@ import {
   eventUpdateSchema,
   eventTypeUpdateSchema,
   guestUpdateSchema,
-  makeDateInTimezone,
   rsvpCreateSchema,
   tableCreateSchema,
   type AssignmentResult,
@@ -432,6 +430,7 @@ export class EventsService {
       },
     });
     if (!event) throw new NotFoundException("Event not found");
+    if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
 
     // TODO(product-feedback): RSVP inputs are fixed. Replace with configurable
     // per-event/series questions for systems, categories, campaigns, apprentice
@@ -477,58 +476,6 @@ export class EventsService {
         if (incomingIsDm && existingIsPlayer) {
           throw new ForbiddenException(
             "You are already registered as a player for this event. Use the change-role flow to switch to DM.",
-          );
-        }
-      }
-
-      // Same-night conflict check: a user cannot register for two events on the
-      // same calendar date in the guild's timezone (§4.1 — no double-booking).
-      // Re-registering for the same event (existingRsvp path above) is allowed.
-      if (!existingRsvp || existingRsvp.status === "CANCELLED") {
-        const settings = await tx.guildSettings.findUnique({
-          where: { guildId: event.guildId },
-          select: { defaultTimezone: true },
-        });
-        const tz = settings?.defaultTimezone ?? "America/New_York";
-
-        const dateFmt = new Intl.DateTimeFormat("en-CA", {
-          timeZone: tz,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
-        const eventParts = dateFmt.formatToParts(event.startAt);
-        const year  = parseInt(eventParts.find((p) => p.type === "year")!.value,  10);
-        const month = parseInt(eventParts.find((p) => p.type === "month")!.value, 10);
-        const day   = parseInt(eventParts.find((p) => p.type === "day")!.value,   10);
-
-        const dayStart = makeDateInTimezone(year, month, day, 0, 0, tz);
-        // Advance 25 h to safely cross midnight even during DST transitions, then
-        // snap back to the next calendar midnight in the guild timezone.
-        const nextDayProxy = new Date(dayStart.getTime() + 25 * 60 * 60 * 1000);
-        const nextParts = dateFmt.formatToParts(nextDayProxy);
-        const dayEnd = makeDateInTimezone(
-          parseInt(nextParts.find((p) => p.type === "year")!.value,  10),
-          parseInt(nextParts.find((p) => p.type === "month")!.value, 10),
-          parseInt(nextParts.find((p) => p.type === "day")!.value,   10),
-          0, 0, tz,
-        );
-
-        const sameNightConflict = await tx.rSVP.findFirst({
-          where: {
-            primaryDiscordUserId: input.discordUserId,
-            status: { not: "CANCELLED" },
-            eventId: { not: eventId },
-            event: {
-              guildId: event.guildId,
-              startAt: { gte: dayStart, lt: dayEnd },
-            },
-          },
-          select: { eventId: true },
-        });
-        if (sameNightConflict) {
-          throw new ConflictException(
-            "You already have an RSVP for another event on this date. You cannot register for two events on the same night.",
           );
         }
       }
@@ -658,6 +605,7 @@ export class EventsService {
       include: { eventType: true },
     });
     if (!event) throw new NotFoundException("Event not found");
+    if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
     if (input.guests.length > event.eventType.maxGuestsPerRsvp) {
       throw new BadRequestException(
         `This event allows at most ${event.eventType.maxGuestsPerRsvp} guests`,
@@ -802,6 +750,7 @@ export class EventsService {
       },
     });
     if (!event) throw new NotFoundException("Event not found");
+    if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
 
     // TODO(product-feedback): This is occurrence-specific table registration,
     // but it still lacks configured per-system defaults and authorized
@@ -1318,6 +1267,7 @@ export class EventsService {
       where: { id: eventId },
     });
     if (!event) throw new NotFoundException("Event not found");
+    if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
 
     const participant = await this.prisma.client.eventParticipant.findUnique({
       where: { id: input.participantId },
@@ -1543,6 +1493,7 @@ export class EventsService {
       where: { id: eventId },
     });
     if (!event) throw new NotFoundException("Event not found");
+    if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
 
     // Find existing preference of this type for the same target.
     const existing = await this.prisma.client.eventSignupPreference.findFirst({
