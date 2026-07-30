@@ -16,7 +16,9 @@ type MessageType =
   | "REMINDER"
   | "CUSTOM"
   | "ASSIGNMENT_LOCK"
-  | "BACKUP_DM_FOLLOW_UP";
+  | "BACKUP_DM_FOLLOW_UP"
+  | "ASSIGNMENT_SEATED"
+  | "ASSIGNMENT_WAITLISTED";
 
 type EventForMessageJobs = {
   id: string;

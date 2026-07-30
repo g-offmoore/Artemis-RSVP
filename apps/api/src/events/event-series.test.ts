@@ -85,6 +85,9 @@ function makePrismaMock(overrides: Record<string, unknown> = {}) {
       eventType: {
         findFirst: vi.fn(),
       },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null), // no duplicate by default
+      },
       ...overrides,
     },
   };
