@@ -28,7 +28,6 @@ const envSchema = z.object({
   METRICS_TOKEN: optionalString,
   DISCORD_TOKEN: optionalString,
   DISCORD_OPS_WEBHOOK_URL: optionalUrl,
-  FEEDBACK_FORM_URL: optionalUrl,
 });
 
 export type ApiEnv = z.infer<typeof envSchema>;
