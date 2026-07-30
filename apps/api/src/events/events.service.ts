@@ -98,6 +98,57 @@ export class EventsService {
     }));
   }
 
+  async discordSyncFailures(guildId: string) {
+    if (!guildId) throw new BadRequestException("guildId is required");
+
+    const [failedRoles, failedThreadEvents, failedMessageJobs, failedPostLogs] = await Promise.all([
+      this.prisma.client.eventRole.findMany({
+        where: {
+          discordRoleId: null,
+          deletedAt: null,
+          failedAt: { not: null },
+          event: { guildId },
+        },
+        include: { event: { select: { id: true, title: true, startAt: true } } },
+        orderBy: { failedAt: "desc" },
+        take: 50,
+      }),
+      this.prisma.client.event.findMany({
+        where: {
+          guildId,
+          discordThreadId: null,
+          status: { notIn: ["CANCELLED", "ARCHIVED"] },
+          threadRetryCount: { gte: 1 },
+        },
+        select: { id: true, title: true, startAt: true, threadRetryCount: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+      this.prisma.client.eventMessageJob.findMany({
+        where: { status: "FAILED", event: { guildId } },
+        include: { event: { select: { id: true, title: true } } },
+        orderBy: { failedAt: "desc" },
+        take: 50,
+      }),
+      this.prisma.client.auditLog.findMany({
+        where: { guildId, action: "discord_post.failed" },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+    ]);
+
+    return { failedRoles, failedThreadEvents, failedMessageJobs, failedPostLogs };
+  }
+
+  async auditLogs(eventId: string) {
+    const logs = await this.prisma.client.auditLog.findMany({
+      where: { eventId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return logs;
+  }
+
   async get(id: string) {
     const event = await this.prisma.client.event.findUnique({
       where: { id },

@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { MetricsService } from "../metrics/metrics.service.js";
 
 type DiscordEmbed = {
   title: string;
@@ -28,7 +29,10 @@ type DiscordComponent = {
 export class DiscordEventPostService {
   private readonly logger = new Logger(DiscordEventPostService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly metrics: MetricsService,
+  ) {}
 
   async publishEventPost(eventId: string, actorDiscordId: string) {
     const token = process.env.DISCORD_TOKEN;
@@ -98,6 +102,7 @@ export class DiscordEventPostService {
 
       return { ok: true, channelId: event.channelId, messageId };
     } catch (error) {
+      this.metrics.discordFailures.inc({ operation: "post_publish" });
       await this.prisma.client.auditLog.create({
         data: {
           guildId: event.guildId,

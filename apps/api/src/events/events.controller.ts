@@ -30,6 +30,11 @@ export class EventsController {
     return this.events.list(guildId);
   }
 
+  @Get("discord-sync-failures")
+  discordSyncFailures(@Query("guildId") guildId: string) {
+    return this.events.discordSyncFailures(guildId);
+  }
+
   @Get(":id")
   get(@Param("id") id: string) {
     return this.events.get(id);
@@ -151,6 +156,12 @@ export class EventsController {
   @Get(":id/message-jobs")
   listMessageJobs(@Param("id") id: string) {
     return this.messageJobs.listForEvent(id);
+  }
+
+  // Audit log for a specific event (ops/admin: who changed what, when).
+  @Get(":id/audit-logs")
+  auditLogs(@Param("id") id: string) {
+    return this.events.auditLogs(id);
   }
 
   // ─── Event role ───────────────────────────────────────────────────────────
