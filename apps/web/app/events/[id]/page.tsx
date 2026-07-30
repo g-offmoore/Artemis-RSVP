@@ -4,15 +4,15 @@ import {
   EventDetail,
   GuildSettings,
   SeatingGroup,
+  SignupPreference,
 } from "../../../src/lib/artemis-api";
+import { requireSession } from "../../../src/lib/auth";
 import { AttendancePanel } from "./attendance-panel";
 import { BackupDmPanel } from "./backup-dm-panel";
 import { EditEventForm } from "./edit-event-form";
 import { EligibilityRulesPanel } from "./eligibility-rules-panel";
 import { EventManagement } from "./event-management";
 import { ParticipantsPanel } from "./participants-panel";
-
-const guildId = process.env.DISCORD_GUILD_ID;
 
 function toDateInputValue(isoString: string, timeZone: string) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -38,15 +38,17 @@ export default async function EventPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [event, settings, messageJobs, backupDmCandidates] = await Promise.all([
-    artemisApi<EventDetail>(`/api/v1/events/${id}`),
-    guildId
-      ? artemisApi<GuildSettings>(
-          `/api/v1/guild-settings?guildId=${guildId}`,
-        ).catch(() => null)
-      : Promise.resolve(null),
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
+  const [event, settings, messageJobs, backupDmCandidates, preferences] = await Promise.all([
+    artemisApi<EventDetail>(`/api/v1/events/${id}`, { guildId }),
+    artemisApi<GuildSettings>(
+      `/api/v1/guild-settings?guildId=${guildId}`,
+      { guildId },
+    ).catch(() => null),
     artemisApi<EventDetail["messageJobs"]>(
       `/api/v1/events/${id}/message-jobs`,
+      { guildId },
     ).catch(() => []),
     artemisApi<
       Array<{
@@ -59,7 +61,9 @@ export default async function EventPage({
         dmCountLast30Days: number;
         backupPullCountLast90Days: number;
       }>
-    >(`/api/v1/events/${id}/backup-dm/candidates`).catch(() => []),
+    >(`/api/v1/events/${id}/backup-dm/candidates`, { guildId }).catch(() => []),
+    // Staff/admin-only: player-with-player and player-with-DM preferences (rules.md §5.1, §11.4).
+    artemisApi<SignupPreference[]>(`/api/v1/events/${id}/preferences`, { guildId }).catch(() => []),
   ]);
   const eventTimeZone =
     settings?.defaultTimezone ??
@@ -111,10 +115,10 @@ export default async function EventPage({
           }}
         >
           <span className="status">{event.status}</span>
-          {event.messageId && guildId ? (
+          {event.messageId ? (
             <a
               className="muted"
-              href={`https://discord.com/channels/${guildId}/${event.channelId}/${event.messageId}`}
+              href={`https://discord.com/channels/${event.guildId}/${event.channelId}/${event.messageId}`}
               target="_blank"
               rel="noopener noreferrer"
               style={{ fontSize: "0.75rem" }}
@@ -266,6 +270,38 @@ export default async function EventPage({
         rules={event.eligibilityRules ?? []}
         settings={settings}
       />
+
+      {preferences.length > 0 && (
+        <>
+          <h2>Signup Preferences</h2>
+          <p className="muted">
+            Staff/admin-only. Soft hints for assignment — who a player wants to sit with or avoid, and which DM they'd
+            prefer or prefer to avoid.
+          </p>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Preference</th>
+                <th>Target</th>
+                <th>Strength</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preferences.map((pref) => (
+                <tr key={pref.id}>
+                  <td className="muted">{pref.userId}</td>
+                  <td>{pref.preferenceType.replace("_", " ")}</td>
+                  <td className="muted">{pref.targetUserId ?? "—"}</td>
+                  <td>{pref.strength}</td>
+                  <td className="muted">{pref.note ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {event.seatingGroups && event.seatingGroups.length > 0 && (
         <>

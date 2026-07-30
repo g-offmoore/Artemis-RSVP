@@ -81,6 +81,23 @@ docker compose --env-file .env.production.example run --rm --no-deps -e ARTEMIS_
 
 ## Operator Event Workflow
 
+### Multi-Guild
+
+Artemis is a single deployment shared by every store's Discord server. There is no
+per-deployment guild env var: the bot registers slash commands and seeds a default
+`GuildSettings` row and event-type catalog (D&D, Daggerheart, Board Game) automatically
+the moment it's invited to a new guild (Discord `guildCreate`). Staff then run the
+`/ops set-*` commands below to customize that guild's defaults.
+
+Web dashboard access is scoped per guild: on login, Artemis checks which guilds the
+authenticated Discord user belongs to that Artemis also manages, and gates access using
+each guild's own `staffRoleIds`/`adminRoleIds` (configured via `/ops` in that guild — see
+`docs/SECURITY.md`). A user in more than one managed guild gets a guild switcher in the
+dashboard topbar. `PLATFORM_ADMIN_DISCORD_USER_IDS` (comma-separated Discord user IDs) is
+an optional allowlist for the platform operator's own account(s) to access every guild's
+dashboard regardless of Discord membership or role — useful for supporting stores you
+don't personally play in.
+
 ### First-Time Guild Setup
 
 Before staff create events, configure guild defaults with the `/ops` Discord commands:

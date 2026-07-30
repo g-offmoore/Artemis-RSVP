@@ -1,20 +1,21 @@
 import Link from "next/link";
-import { artemisApi, AmbassadorProfile } from "../../src/lib/artemis-api";
+import { artemisApi, AmbassadorProfile, GuildSettings } from "../../src/lib/artemis-api";
 import { RegisterAmbassadorForm } from "./register-ambassador-form";
-import { allowedRoleAccessMessage } from "../../src/lib/auth";
-
-const guildId = process.env.DISCORD_GUILD_ID;
+import { guildAccessMessage, requireSession } from "../../src/lib/auth";
 
 export default async function AmbassadorsPage() {
-  if (!guildId) {
-    return <p className="error">DISCORD_GUILD_ID is not configured.</p>;
-  }
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
 
-  const roleAccessMessage = allowedRoleAccessMessage();
+  const [ambassadors, settings] = await Promise.all([
+    artemisApi<AmbassadorProfile[]>(
+      `/api/v1/ambassadors?guildId=${guildId}`,
+      { guildId },
+    ).catch(() => [] as AmbassadorProfile[]),
+    artemisApi<GuildSettings>(`/api/v1/guild-settings?guildId=${guildId}`, { guildId }).catch(() => null),
+  ]);
 
-  const ambassadors = await artemisApi<AmbassadorProfile[]>(
-    `/api/v1/ambassadors?guildId=${guildId}`,
-  ).catch(() => [] as AmbassadorProfile[]);
+  const roleAccessMessage = guildAccessMessage(settings);
 
   const active = ambassadors.filter((a) => a.active);
   const inactive = ambassadors.filter((a) => !a.active);

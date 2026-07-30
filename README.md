@@ -13,8 +13,6 @@ Artemis is a Discord-native event operations assistant for community game stores
 - `scripts`: deployment, backup, restore-drill, cleanup, and host-health scripts.
 - `docs`: operations and security runbooks.
 
-The old root `src/`, `rsvphandlers.ts`, and `Artemis/` folders are prototype references and are not production entrypoints.
-
 ## Local Verification
 
 ```bash

@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { AmbassadorGuildScopeGuard } from "../common/guild-scope.guard.js";
 import { AmbassadorsService } from "./ambassadors.service.js";
 
 @Controller("api/v1/ambassadors")
+@UseGuards(AmbassadorGuildScopeGuard)
 export class AmbassadorsController {
   constructor(private readonly ambassadors: AmbassadorsService) {}
 

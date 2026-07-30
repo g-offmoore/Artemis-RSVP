@@ -2,7 +2,7 @@ const apiBase = process.env.API_INTERNAL_URL ?? "http://api:3000";
 
 export async function artemisApi<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; guildId?: string } = {},
 ): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method ?? "GET",
@@ -11,6 +11,7 @@ export async function artemisApi<T>(
       ...(process.env.INTERNAL_API_TOKEN
         ? { "x-artemis-token": process.env.INTERNAL_API_TOKEN }
         : {}),
+      ...(options.guildId ? { "x-artemis-guild-id": options.guildId } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
     cache: "no-store",
@@ -25,6 +26,7 @@ export async function artemisApi<T>(
 
 export type EventSummary = {
   id: string;
+  guildId: string;
   title: string;
   status: string;
   gameSystem: string;
@@ -80,6 +82,16 @@ export type EligibilityRule = {
   requiredDiscordRoleIds: string[];
   deniedDiscordRoleIds: string[];
   requiresApproval: boolean;
+};
+
+export type SignupPreference = {
+  id: string;
+  userId: string;
+  preferenceType: "PREFER_DM" | "AVOID_DM" | "PREFER_PLAYER" | "AVOID_PLAYER" | "NOTE";
+  targetUserId?: string | null;
+  note?: string | null;
+  strength: "SOFT" | "HARD";
+  createdAt: string;
 };
 
 export type SeatingGroup = {

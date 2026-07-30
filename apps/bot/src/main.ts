@@ -24,7 +24,7 @@ import {
   parseEventDateTimeParts,
 } from "@artemis/domain";
 import pino from "pino";
-import { ArtemisApi, ArtemisApiError } from "./api.js";
+import { ArtemisApi, ArtemisApiError, withGuildContext } from "./api.js";
 import { loadConfig } from "./config.js";
 import { runDiscordOpsCheck } from "./discord-ops.js";
 
@@ -81,7 +81,17 @@ const client = new Client({
 
 client.once(Events.ClientReady, async () => {
   logger.info({ user: client.user?.tag }, "Discord bot logged in");
-  await registerCommands();
+  // Backfill command registration for every guild the bot is already in, covering
+  // restarts and the pre-multi-guild production install. New installs are handled by
+  // the guildCreate handler below.
+  for (const guild of client.guilds.cache.values()) {
+    await registerCommandsForGuild(guild.id);
+  }
+});
+
+client.on(Events.GuildCreate, async (guild) => {
+  logger.info({ guildId: guild.id, name: guild.name }, "Bot joined a new guild");
+  await onboardGuild(guild.id);
 });
 
 client.on("error", (error) => logger.error({ error }, "Discord client error"));
@@ -90,35 +100,37 @@ client.on("shardError", (error) =>
 );
 
 client.on("interactionCreate", async (interaction) => {
-  try {
-    if (interaction.isChatInputCommand()) {
-      await handleCommand(interaction);
-      return;
-    }
+  await withGuildContext(interaction.guildId, async () => {
+    try {
+      if (interaction.isChatInputCommand()) {
+        await handleCommand(interaction);
+        return;
+      }
 
-    if (interaction.isButton()) {
-      await handleButton(interaction);
-      return;
-    }
+      if (interaction.isButton()) {
+        await handleButton(interaction);
+        return;
+      }
 
-    if (interaction.isUserSelectMenu()) {
-      await handleUserSelectMenu(interaction);
-      return;
-    }
+      if (interaction.isUserSelectMenu()) {
+        await handleUserSelectMenu(interaction);
+        return;
+      }
 
-    if (interaction.isModalSubmit()) {
-      await handleModal(interaction);
+      if (interaction.isModalSubmit()) {
+        await handleModal(interaction);
+      }
+    } catch (error) {
+      logger.error({ error }, "Interaction failed");
+      await replySafely(interaction, userFacingError(error));
+      await sendOpsAlert("Discord interaction failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-  } catch (error) {
-    logger.error({ error }, "Interaction failed");
-    await replySafely(interaction, userFacingError(error));
-    await sendOpsAlert("Discord interaction failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  });
 });
 
-async function registerCommands() {
+function buildCommands() {
   const eventCommand = new SlashCommandBuilder()
     .setName("event")
     .setDescription("Manage Artemis events")
@@ -262,18 +274,51 @@ async function registerCommands() {
         ),
     );
 
-  await client.application?.commands.set(
-    [eventCommand.toJSON(), opsCommand.toJSON()],
-    config.DISCORD_GUILD_ID,
-  );
-  logger.info("Slash commands registered");
+  return [eventCommand.toJSON(), opsCommand.toJSON()];
+}
+
+/**
+ * Registers slash commands into a single guild. Called reactively on guildCreate (new
+ * install) and once at startup for every guild the bot is already in, so commands are
+ * available immediately rather than waiting on global-command propagation (~1hr).
+ */
+async function registerCommandsForGuild(guildId: string) {
+  await client.application?.commands.set(buildCommands(), guildId);
+  logger.info({ guildId }, "Slash commands registered for guild");
+}
+
+async function onboardGuild(guildId: string) {
+  try {
+    await registerCommandsForGuild(guildId);
+    await withGuildContext(guildId, () => api.onboardGuild(guildId));
+    logger.info({ guildId }, "Guild onboarded");
+  } catch (error) {
+    logger.error({ error, guildId }, "Guild onboarding failed");
+    await sendOpsAlert("Guild onboarding failed", {
+      guildId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Every command/button/select/modal Artemis handles is guild-only by registration, so
+ * interaction.guildId should always be populated. Throwing here (rather than falling
+ * back to some default guild) fails closed and is caught by the top-level
+ * interactionCreate handler, which replies ephemerally and alerts ops.
+ */
+function requireGuildId(interaction: { guildId: string | null }): string {
+  if (!interaction.guildId) {
+    throw new Error("This action is only available inside a Discord server.");
+  }
+  return interaction.guildId;
 }
 
 async function handleCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "ops") {
     const subcommand = interaction.options.getSubcommand();
     if (subcommand === "check") {
-      await runDiscordOpsCheck(interaction, api, interaction.guildId ?? config.DISCORD_GUILD_ID);
+      await runDiscordOpsCheck(interaction, api, requireGuildId(interaction));
       return;
     }
     if (subcommand === "settings") {
@@ -295,7 +340,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
 
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "create") {
-    const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+    const guildId = requireGuildId(interaction);
     const timeZone = await getGuildTimezone(guildId);
     let startAt: Date;
     let endAt: Date;
@@ -370,7 +415,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
   if (subcommand === "list") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const events = await api.getEvents(
-      interaction.guildId ?? config.DISCORD_GUILD_ID,
+      requireGuildId(interaction),
     );
     if (!Array.isArray(events) || events.length === 0) {
       await interaction.editReply({ content: "No upcoming events." });
@@ -497,25 +542,40 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     return;
   }
 
-  // §7.5: Player seating preferences — sit with or avoid specific players.
+  // §7.5, §14.8: Player seating preferences — sit with/avoid specific players, and
+  // prefer/avoid a specific DM/ambassador. All are soft hints, staff/admin-visible
+  // only (rules.md §5.1, §11.4), and influence assignment only after hard
+  // constraints, eligibility, and capacity are satisfied.
   if (action === "prefs") {
-    const preferMenu = new UserSelectMenuBuilder()
+    const preferPlayerMenu = new UserSelectMenuBuilder()
       .setCustomId(`pref-prefer-player:${eventId}`)
       .setPlaceholder("Players I'd like to sit with")
       .setMinValues(0)
       .setMaxValues(5);
-    const avoidMenu = new UserSelectMenuBuilder()
+    const avoidPlayerMenu = new UserSelectMenuBuilder()
       .setCustomId(`pref-avoid-player:${eventId}`)
       .setPlaceholder("Players I'd prefer to avoid sitting with")
       .setMinValues(0)
       .setMaxValues(5);
+    const preferDmMenu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-prefer-dm:${eventId}`)
+      .setPlaceholder("DM I'd like to have")
+      .setMinValues(0)
+      .setMaxValues(1);
+    const avoidDmMenu = new UserSelectMenuBuilder()
+      .setCustomId(`pref-avoid-dm:${eventId}`)
+      .setPlaceholder("DM I'd prefer to avoid")
+      .setMinValues(0)
+      .setMaxValues(1);
     await interaction.reply({
       content:
-        "**Seating preferences** — these are soft hints, not guarantees.\n" +
-        "Use the first selector for players you'd like to sit with, the second for players you'd prefer to avoid.",
+        "**Preferences** — these are soft hints, not guarantees, and are only visible to staff.\n" +
+        "Players: who you'd like to sit with, or avoid. DM: who you'd like to have run your table, or avoid.",
       components: [
-        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferMenu),
-        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferPlayerMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidPlayerMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(preferDmMenu),
+        new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(avoidDmMenu),
       ],
       flags: MessageFlags.Ephemeral,
     });
@@ -730,9 +790,21 @@ async function handleUserSelectMenu(interaction: Interaction) {
     return;
   }
 
-  if (parts[0] === "pref-prefer-player" || parts[0] === "pref-avoid-player") {
+  if (
+    parts[0] === "pref-prefer-player" ||
+    parts[0] === "pref-avoid-player" ||
+    parts[0] === "pref-prefer-dm" ||
+    parts[0] === "pref-avoid-dm"
+  ) {
     const eventId = parts[1];
-    const preferenceType = parts[0] === "pref-prefer-player" ? "PREFER_PLAYER" : "AVOID_PLAYER";
+    const preferenceType =
+      parts[0] === "pref-prefer-player"
+        ? "PREFER_PLAYER"
+        : parts[0] === "pref-avoid-player"
+          ? "AVOID_PLAYER"
+          : parts[0] === "pref-prefer-dm"
+            ? "PREFER_DM"
+            : "AVOID_DM";
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const selected = [...interaction.users.keys()];
     if (selected.length === 0) {
@@ -749,9 +821,15 @@ async function handleUserSelectMenu(interaction: Interaction) {
         }),
       ),
     );
-    const label = preferenceType === "PREFER_PLAYER" ? "sit-with" : "avoid";
+    const labels: Record<string, string> = {
+      PREFER_PLAYER: "sit-with",
+      AVOID_PLAYER: "avoid",
+      PREFER_DM: "preferred DM",
+      AVOID_DM: "avoided DM",
+    };
+    const noun = preferenceType.endsWith("_DM") ? "DM" : "player";
     await interaction.editReply({
-      content: `Seating preference (${label}) saved for ${selected.length} player(s).`,
+      content: `Preference (${labels[preferenceType]}) saved for ${selected.length} ${noun}(s).`,
     });
     return;
   }
@@ -1128,7 +1206,7 @@ function apiValidationMessage(responseBody: string) {
 
 async function handleOpsSettings(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+  const guildId = requireGuildId(interaction);
   const settings = (await api.getGuildSettings(guildId)) as {
     defaultTimezone?: string;
     defaultEventChannelId?: string;
@@ -1174,7 +1252,7 @@ async function handleOpsSetEventChannel(
   interaction: ChatInputCommandInteraction,
 ) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+  const guildId = requireGuildId(interaction);
   const channel = interaction.options.getChannel("channel", true);
   await api.updateGuildSettings(guildId, {
     defaultEventChannelId: channel.id,
@@ -1187,7 +1265,7 @@ async function handleOpsSetEventChannel(
 
 async function handleOpsSetTimezone(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const guildId = interaction.guildId ?? config.DISCORD_GUILD_ID;
+  const guildId = requireGuildId(interaction);
   const timezone = interaction.options.getString("timezone", true).trim();
 
   // Validate IANA timezone before sending to API

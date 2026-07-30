@@ -5,9 +5,8 @@ import {
   EventSeriesDetail,
   GuildSettings,
 } from "../../../src/lib/artemis-api";
+import { requireSession } from "../../../src/lib/auth";
 import { GenerateOccurrencesForm } from "./generate-form";
-
-const guildId = process.env.DISCORD_GUILD_ID;
 
 const WEEKDAY_LABELS: Record<string, string> = {
   MON: "Monday",
@@ -36,13 +35,14 @@ export default async function SeriesDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
   const [series, settings] = await Promise.all([
-    artemisApi<EventSeriesDetail>(`/api/v1/series/${id}`),
-    guildId
-      ? artemisApi<GuildSettings>(
-          `/api/v1/guild-settings?guildId=${guildId}`,
-        ).catch(() => null)
-      : Promise.resolve(null),
+    artemisApi<EventSeriesDetail>(`/api/v1/series/${id}`, { guildId }),
+    artemisApi<GuildSettings>(
+      `/api/v1/guild-settings?guildId=${guildId}`,
+      { guildId },
+    ).catch(() => null),
   ]);
 
   const eventTimeZone =

@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { CalendarRange, Plus } from "lucide-react";
 import { artemisApi, EventSeriesSummary } from "../../src/lib/artemis-api";
-
-const guildId = process.env.DISCORD_GUILD_ID;
+import { requireSession } from "../../src/lib/auth";
 
 const WEEKDAY_LABELS: Record<string, string> = {
   MON: "Monday",
@@ -20,11 +19,12 @@ function recurrenceLabel(rule: string) {
 }
 
 export default async function SeriesPage() {
-  const seriesList = guildId
-    ? await artemisApi<EventSeriesSummary[]>(
-        `/api/v1/series?guildId=${guildId}`,
-      ).catch(() => [] as EventSeriesSummary[])
-    : ([] as EventSeriesSummary[]);
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
+  const seriesList = await artemisApi<EventSeriesSummary[]>(
+    `/api/v1/series?guildId=${guildId}`,
+    { guildId },
+  ).catch(() => [] as EventSeriesSummary[]);
 
   return (
     <>

@@ -109,16 +109,10 @@ enum EventRoleType {
   AMBASSADOR
 }
 
-enum NotificationStatus {
-  PENDING
-  SENT
-  FAILED
-  SKIPPED
-}
-
 enum EventMessageType {
   PRE_EVENT
   POST_EVENT
+  PREFLIGHT
   REMINDER
   CUSTOM
   ASSIGNMENT_LOCK
@@ -192,7 +186,8 @@ model GuildSettings {
 
 model EventType {
   id                             String        @id @default(cuid())
-  key                            String        @unique
+  guildId                        String
+  key                            String
   name                           String
   requiresRsvp                   Boolean       @default(true)
   allowsGuests                   Boolean       @default(true)
@@ -210,6 +205,9 @@ model EventType {
   series                         EventSeries[]
   createdAt                      DateTime      @default(now())
   updatedAt                      DateTime      @updatedAt
+
+  @@unique([guildId, key])
+  @@index([guildId])
 }
 
 model EventSeries {
@@ -280,7 +278,6 @@ model Event {
   feedbackRequests            FeedbackRequest[]
   roles                       EventRole[]
   auditLogs                   AuditLog[]
-  notifications               NotificationLog[]
   messageJobs                 EventMessageJob[]
   eligibilityRules            EventEligibilityRule[]
   seatingGroups               EventSeatingGroup[]
@@ -499,24 +496,6 @@ model EventRole {
   @@unique([discordRoleId])   // NULL values are not constrained (PostgreSQL semantics)
 }
 
-model NotificationLog {
-  id              String             @id @default(cuid())
-  eventId         String?
-  event           Event?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  recipientUserId String?
-  channelId       String?
-  type            String
-  status          NotificationStatus @default(PENDING)
-  attempts        Int                @default(0)
-  lastError       String?
-  sentAt          DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-
-  @@index([eventId, status])
-  @@index([status, createdAt])
-}
-
 // Persistent scheduled message jobs with observable state.
 // Created on event create/update; updated (not duplicated) on reschedule.
 model EventMessageJob {
@@ -623,16 +602,3 @@ model AuditLog {
   @@index([eventId, createdAt])
 }
 
-model PlayerPreference {
-  id                      String   @id @default(cuid())
-  guildId                 String
-  playerDiscordUserId     String
-  preferredDiscordUserIds String[] @default([])
-  avoidDiscordUserIds     String[] @default([])
-  tableStyleTags          String[] @default([])
-  staffOnlyNotes          String?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
-
-  @@unique([guildId, playerDiscordUserId])
-}

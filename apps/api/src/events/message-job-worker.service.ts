@@ -90,6 +90,11 @@ export class MessageJobWorkerService implements OnModuleInit {
       case "POST_EVENT":
         await this.sendChannelMessage(job, token);
         break;
+      case "PREFLIGHT":
+        // T-24h readiness pass: capacity/category/DM/backup-DM/guest warnings,
+        // private to the organizer. Does not lock anything (rules.md §11.1).
+        await this.sendPreflightWarning(job, token);
+        break;
       case "REMINDER":
         // Sends organizer warning as a DM to the event creator (not the public
         // channel) per rules.md §4.2, §12.4: organizer warnings are private.
@@ -125,6 +130,92 @@ export class MessageJobWorkerService implements OnModuleInit {
 
     const content = buildSimpleContent(job.messageType, event);
     await discordChannelPost(token, job.targetId, { content });
+  }
+
+  // ─── PREFLIGHT (T-24h readiness pass via DM) ─────────────────────────────
+  // Surfaces capacity, category, DM, backup DM, and guest warnings privately
+  // to the organizer with a full day of lead time to react. This pass is
+  // informational only — it must not lock ordinary participant changes
+  // (rules.md §11.1).
+
+  private async sendPreflightWarning(
+    job: { id: string; eventId: string; targetId: string },
+    token: string,
+  ) {
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: job.eventId },
+      include: {
+        tables: { where: { status: { notIn: ["CANCELLED", "COMPLETED"] } } },
+        participants: {
+          where: { assignmentEligible: true },
+          include: {
+            assignments: {
+              where: {
+                status: { in: ["PROJECTED_SEATED", "CONFIRMED_SEATED", "ASSIGNED"] },
+              },
+            },
+          },
+        },
+        rsvps: { where: { signupRole: "BACKUP_DM", status: "GOING" } },
+      },
+    });
+    if (!event) throw new Error(`Event ${job.eventId} not found for preflight job ${job.id}`);
+
+    const startTs = discordTs(event.startAt, "F");
+    const relTs = discordTs(event.startAt, "R");
+
+    // Category/capacity: seated vs waitlisted per track, and which tracks lack a table.
+    const seatedIds = new Set(
+      event.participants.flatMap((p) => p.assignments.map((a) => a.eventParticipantId)),
+    );
+    const byTrack = { NORMAL: { seated: 0, waitlisted: 0 }, HEROIC: { seated: 0, waitlisted: 0 }, MIXED: { seated: 0, waitlisted: 0 } };
+    for (const p of event.participants) {
+      const track = (p.playerCategory ?? "MIXED") as keyof typeof byTrack;
+      if (!byTrack[track]) continue;
+      if (seatedIds.has(p.id)) byTrack[track].seated++;
+      else byTrack[track].waitlisted++;
+    }
+    const tablesByTrack = new Map<string, number>();
+    for (const t of event.tables) {
+      tablesByTrack.set(t.tableType, (tablesByTrack.get(t.tableType) ?? 0) + 1);
+    }
+    const trackLines = (Object.entries(byTrack) as Array<[string, { seated: number; waitlisted: number }]>)
+      .filter(([, v]) => v.seated + v.waitlisted > 0)
+      .map(([track, v]) => {
+        const tables = tablesByTrack.get(track) ?? 0;
+        const dmWarn = tables === 0 ? " ⚠️ NO DM" : "";
+        return `${track}: ${v.seated} seated, ${v.waitlisted} waitlisted — ${tables} table(s)${dmWarn}`;
+      })
+      .join("\n");
+
+    // DM coverage: any table with no ambassador attached yet.
+    const tablesMissingDm = event.tables.filter((t) => !t.ambassadorProfileId).length;
+
+    // Backup DM coverage.
+    const backupCount = event.rsvps.length;
+
+    // Guest warnings: guests seated vs waitlisted (a waitlisted guest can strand its owner's party).
+    const guestParticipants = event.participants.filter((p) => p.participantType === "GUEST");
+    const guestWaitlisted = guestParticipants.filter((p) => !seatedIds.has(p.id)).length;
+
+    const lockAt = new Date(event.startAt.getTime() - 60 * 60 * 1000);
+    const lockTs = discordTs(lockAt, "R");
+
+    const content =
+      `🔎 **${event.title}** — 24-hour preflight\n` +
+      `Starts ${startTs} (${relTs})\n\n` +
+      (trackLines ? `**Capacity/category status:**\n${trackLines}\n\n` : "") +
+      (tablesMissingDm > 0 ? `⚠️ **${tablesMissingDm} table(s) missing a DM.**\n\n` : "") +
+      `**Backup DMs available:** ${backupCount}\n` +
+      `**Guests:** ${guestParticipants.length} registered` +
+      (guestWaitlisted > 0 ? ` (${guestWaitlisted} currently waitlisted)` : "") +
+      `\n\n**Assignment lock:** ${lockTs}\n\n` +
+      `This is a readiness check — nothing is locked yet. You have time to add tables, ` +
+      `recruit backup DMs, or adjust capacity before the T-1h lock.\n` +
+      `_This message is private to you as the event organizer._`;
+
+    await discordDmPost(token, job.targetId, { content });
+    this.logger.log(`Sent preflight warning DM to ${job.targetId} for event ${job.eventId}`);
   }
 
   // ─── REMINDER (T-4h organizer warning via DM) ────────────────────────────

@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireSession } from "../src/lib/auth";
+import { GuildSwitcher } from "./guild-switcher";
 
 export const metadata: Metadata = {
   title: "Artemis",
@@ -44,6 +45,7 @@ export default async function RootLayout({
               </details>
             </div>
             <div className="account">
+              <GuildSwitcher guilds={session.guilds} activeGuildId={session.activeGuildId} />
               <span>{session.username}</span>
               <a href="/api/auth/logout">Sign out</a>
             </div>

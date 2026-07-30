@@ -7,13 +7,16 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from "@nestjs/common";
+import { EventGuildScopeGuard } from "../common/guild-scope.guard.js";
 import { DiscordEventPostService } from "./discord-event-post.service.js";
 import { DiscordRoleService } from "./discord-role.service.js";
 import { EventsService } from "./events.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
 
 @Controller("api/v1/events")
+@UseGuards(EventGuildScopeGuard)
 export class EventsController {
   constructor(
     private readonly events: EventsService,
@@ -258,17 +261,6 @@ export class EventsController {
 
   @Post(":id/publish")
   publishEvent(
-    @Param("id") id: string,
-    @Body() body: { actorDiscordId?: string } = {},
-  ) {
-    return this.discordPosts.publishEventPost(
-      id,
-      body.actorDiscordId ?? "system",
-    );
-  }
-
-  @Post(":id/discord-post")
-  publishDiscordPost(
     @Param("id") id: string,
     @Body() body: { actorDiscordId?: string } = {},
   ) {

@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Query, UseGuards } from "@nestjs/common";
+import { PathGuildIdScopeGuard } from "../common/guild-scope.guard.js";
 import { GuildSettingsService } from "./guild-settings.service.js";
 
 @Controller("api/v1/guild-settings")
+@UseGuards(PathGuildIdScopeGuard)
 export class GuildSettingsController {
   constructor(private readonly guildSettings: GuildSettingsService) {}
 

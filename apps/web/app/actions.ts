@@ -23,13 +23,11 @@ export async function createEventAction(
   formData: FormData,
 ): Promise<ActionState> {
   const session = await requireSession();
-  const guildId = process.env.DISCORD_GUILD_ID;
+  const guildId = session.activeGuildId;
   const channelId =
     valueOf(formData, "channelId") || process.env.DISCORD_EVENT_CHANNEL_ID;
   let eventId = "";
 
-  if (!guildId)
-    return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
   if (!channelId)
     return {
       ok: false,
@@ -54,6 +52,7 @@ export async function createEventAction(
 
     const event = await artemisApi<{ id: string }>("/api/v1/events", {
       method: "POST",
+      guildId,
       body: {
         guildId,
         channelId,
@@ -69,6 +68,7 @@ export async function createEventAction(
     eventId = event.id;
     await artemisApi(`/api/v1/events/${event.id}/publish`, {
       method: "POST",
+      guildId,
       body: { actorDiscordId: session.discordUserId },
     });
   } catch (error) {
@@ -109,6 +109,7 @@ export async function updateEventAction(
 
     await artemisApi(`/api/v1/events/${eventId}`, {
       method: "PATCH",
+      guildId: session.activeGuildId,
       body: {
         title: optionalValueOf(formData, "title"),
         description: valueOf(formData, "description") || null,
@@ -133,10 +134,9 @@ export async function createSeriesAction(
   formData: FormData,
 ): Promise<ActionState> {
   const session = await requireSession();
-  const guildId = process.env.DISCORD_GUILD_ID;
-  if (!guildId) return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
+  const guildId = session.activeGuildId;
 
-  let seriesId = "";
+  let seriesId: string;
   try {
     const defaultChannelId =
       valueOf(formData, "defaultChannelId") || process.env.DISCORD_EVENT_CHANNEL_ID || "";
@@ -145,6 +145,7 @@ export async function createSeriesAction(
 
     const series = await artemisApi<{ id: string }>("/api/v1/series", {
       method: "POST",
+      guildId,
       body: {
         guildId,
         name: valueOf(formData, "name"),
@@ -170,13 +171,14 @@ export async function generateOccurrencesAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
+  const session = await requireSession();
   const seriesId = valueOf(formData, "seriesId");
   const count = parseInt(valueOf(formData, "count") || "4", 10);
 
   try {
     const result = await artemisApi<{ created: number; events: Array<{ id: string; startAt: string }> }>(
       `/api/v1/series/${seriesId}/generate`,
-      { method: "POST", body: { count } },
+      { method: "POST", guildId: session.activeGuildId, body: { count } },
     );
     revalidatePath(`/series/${seriesId}`);
     revalidatePath("/");
@@ -199,6 +201,7 @@ export async function runAssignmentsAction(
       warnings?: unknown[];
     }>(`/api/v1/events/${eventId}/assignments/run`, {
       method: "POST",
+      guildId: session.activeGuildId,
       body: { actorDiscordId: session.discordUserId },
     });
     revalidatePath(`/events/${eventId}`);
@@ -223,6 +226,7 @@ export async function publishDiscordPostAction(
       `/api/v1/events/${eventId}/publish`,
       {
         method: "POST",
+        guildId: session.activeGuildId,
         body: { actorDiscordId: session.discordUserId },
       },
     );
@@ -246,6 +250,7 @@ export async function cancelEventAction(
   try {
     await artemisApi(`/api/v1/events/${eventId}`, {
       method: "DELETE",
+      guildId: session.activeGuildId,
       body: { actorDiscordId: session.discordUserId },
     });
     revalidatePath("/");
@@ -268,6 +273,7 @@ export async function lockAssignmentsAction(
       `/api/v1/events/${eventId}/assignments/lock`,
       {
         method: "POST",
+        guildId: session.activeGuildId,
         body: {
           actorDiscordId: session.discordUserId,
           reason: optionalValueOf(formData, "reason"),
@@ -296,6 +302,7 @@ export async function backupDmActionAction(
   try {
     await artemisApi(`/api/v1/events/${eventId}/backup-dm/action`, {
       method: "POST",
+      guildId: session.activeGuildId,
       body: {
         actorDiscordId: session.discordUserId,
         participantId,
@@ -315,11 +322,12 @@ export async function retryEventRoleAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
+  const session = await requireSession();
   const eventId = valueOf(formData, "eventId");
   try {
     const result = await artemisApi<{ ok: boolean; discordRoleId?: string; error?: string }>(
       `/api/v1/events/${eventId}/roles/retry`,
-      { method: "POST" },
+      { method: "POST", guildId: session.activeGuildId },
     );
     revalidatePath(`/events/${eventId}`);
     if (result.ok) {
@@ -335,8 +343,8 @@ export async function updateSettingsAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
-  const guildId = process.env.DISCORD_GUILD_ID;
-  if (!guildId) return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
 
   const parseIds = (key: string) =>
     valueOf(formData, key)
@@ -347,6 +355,7 @@ export async function updateSettingsAction(
   try {
     await artemisApi(`/api/v1/guild-settings/${guildId}`, {
       method: "PATCH",
+      guildId,
       body: {
         defaultTimezone: optionalValueOf(formData, "defaultTimezone"),
         defaultEventChannelId: optionalValueOf(formData, "defaultEventChannelId"),
@@ -373,12 +382,13 @@ export async function registerAmbassadorAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
-  const guildId = process.env.DISCORD_GUILD_ID;
-  if (!guildId) return { ok: false, message: "DISCORD_GUILD_ID is not configured." };
+  const session = await requireSession();
+  const guildId = session.activeGuildId;
 
   try {
     await artemisApi("/api/v1/ambassadors", {
       method: "POST",
+      guildId,
       body: {
         guildId,
         discordUserId: valueOf(formData, "discordUserId"),
@@ -405,11 +415,13 @@ export async function updateAmbassadorAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
+  const session = await requireSession();
   const ambassadorId = valueOf(formData, "ambassadorId");
 
   try {
     await artemisApi(`/api/v1/ambassadors/${ambassadorId}`, {
       method: "PATCH",
+      guildId: session.activeGuildId,
       body: {
         displayName: optionalValueOf(formData, "displayName"),
         supportedGameSystems: valueOf(formData, "supportedGameSystems")
@@ -449,10 +461,14 @@ export async function deregisterAmbassadorAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
+  const session = await requireSession();
   const ambassadorId = valueOf(formData, "ambassadorId");
 
   try {
-    await artemisApi(`/api/v1/ambassadors/${ambassadorId}`, { method: "DELETE" });
+    await artemisApi(`/api/v1/ambassadors/${ambassadorId}`, {
+      method: "DELETE",
+      guildId: session.activeGuildId,
+    });
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) };
   }
@@ -465,6 +481,7 @@ export async function upsertEligibilityRuleAction(
   _state: ActionState = emptyState,
   formData: FormData,
 ): Promise<ActionState> {
+  const session = await requireSession();
   const eventId = valueOf(formData, "eventId");
   const parseIds = (key: string) =>
     valueOf(formData, key)
@@ -475,6 +492,7 @@ export async function upsertEligibilityRuleAction(
   try {
     await artemisApi(`/api/v1/events/${eventId}/eligibility/rules`, {
       method: "POST",
+      guildId: session.activeGuildId,
       body: {
         signupRole: valueOf(formData, "signupRole"),
         allowedDiscordRoleIds: parseIds("allowedDiscordRoleIds"),
@@ -502,6 +520,7 @@ export async function removeRsvpAction(
   try {
     await artemisApi(`/api/v1/events/${eventId}/rsvps/${discordUserId}`, {
       method: "DELETE",
+      guildId: session.activeGuildId,
       body: { actorDiscordId: session.discordUserId },
     });
   } catch (error) {
@@ -529,6 +548,7 @@ export async function confirmAttendanceAction(
   try {
     await artemisApi(`/api/v1/events/${eventId}/attendance`, {
       method: "POST",
+      guildId: session.activeGuildId,
       body: { actorDiscordId: session.discordUserId, records },
     });
   } catch (error) {
@@ -556,6 +576,7 @@ export async function createTableAction(
       hardCap: number;
     }>(`/api/v1/events/${eventId}/tables`, {
       method: "POST",
+      guildId: session.activeGuildId,
       body: {
         ambassadorDiscordId: session.discordUserId,
         ambassadorDisplayName: session.username,

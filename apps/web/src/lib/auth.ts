@@ -4,11 +4,19 @@ import { redirect } from "next/navigation";
 
 const sessionCookie = "artemis_session";
 
+export type GuildMembership = {
+  guildId: string;
+  name: string;
+  roles: string[];
+};
+
 export type DashboardSession = {
   discordUserId: string;
   username: string;
   avatar?: string;
-  roles: string[];
+  guilds: GuildMembership[];
+  activeGuildId: string;
+  isPlatformAdmin: boolean;
   createdAt: number;
 };
 
@@ -53,25 +61,46 @@ export async function clearSession() {
   cookieStore.delete(sessionCookie);
 }
 
-export function configuredAllowedRoleIds() {
-  return (process.env.DASHBOARD_ALLOWED_ROLE_IDS ?? "")
+/** The guild the dashboard is currently scoped to for this session. */
+export function activeGuild(session: DashboardSession): GuildMembership | undefined {
+  return session.guilds.find((guild) => guild.guildId === session.activeGuildId);
+}
+
+export function activeGuildRoles(session: DashboardSession): string[] {
+  return activeGuild(session)?.roles ?? [];
+}
+
+/**
+ * Per-guild dashboard role gate: a user needs one of that guild's own staff/admin role
+ * IDs (from GuildSettings), not a single deployment-wide allowlist — each store manages
+ * its own access. An empty allowlist for a guild means any member of that guild may in.
+ */
+export function hasAllowedRoleForGuild(
+  memberRoles: string[],
+  guildSettings: { staffRoleIds?: string[]; adminRoleIds?: string[] },
+) {
+  const allowed = [...(guildSettings.staffRoleIds ?? []), ...(guildSettings.adminRoleIds ?? [])];
+  return allowed.length === 0 || memberRoles.some((role) => allowed.includes(role));
+}
+
+/** User-facing description of this guild's dashboard access gate, for empty states. */
+export function guildAccessMessage(guildSettings: { staffRoleIds?: string[]; adminRoleIds?: string[] } | null) {
+  const allowed = [...(guildSettings?.staffRoleIds ?? []), ...(guildSettings?.adminRoleIds ?? [])];
+  if (allowed.length === 0) {
+    return "All authenticated members of this guild can access dashboard and ambassador tools when no role allowlist is configured.";
+  }
+  return "Dashboard and ambassador tools require one of this guild's configured staff/admin Discord roles.";
+}
+
+export function configuredPlatformAdminIds() {
+  return (process.env.PLATFORM_ADMIN_DISCORD_USER_IDS ?? "")
     .split(",")
-    .map((role) => role.trim())
+    .map((id) => id.trim())
     .filter(Boolean);
 }
 
-export function hasAllowedRole(roles: string[]) {
-  const allowed = configuredAllowedRoleIds();
-  return allowed.length === 0 || roles.some((role) => allowed.includes(role));
-}
-
-export function allowedRoleAccessMessage() {
-  const allowed = configuredAllowedRoleIds();
-  if (allowed.length === 0) {
-    return "All authenticated guild members can access dashboard and ambassador tools when no role allowlist is configured.";
-  }
-
-  return `Dashboard and ambassador tools require one of the configured Discord role IDs: ${allowed.join(", ")}.`;
+export function isPlatformAdmin(discordUserId: string) {
+  return configuredPlatformAdminIds().includes(discordUserId);
 }
 
 function sign(payload: string) {
