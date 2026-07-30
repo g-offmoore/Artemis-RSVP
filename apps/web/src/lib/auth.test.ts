@@ -6,6 +6,7 @@ import {
   DashboardSession,
   guildAccessMessage,
   hasAllowedRoleForGuild,
+  isDashboardSession,
   isPlatformAdmin,
 } from "./auth.js";
 
@@ -84,5 +85,41 @@ describe("guildAccessMessage", () => {
 
   it("describes gated access when roles are configured", () => {
     expect(guildAccessMessage({ staffRoleIds: ["r1"], adminRoleIds: [] })).toMatch(/configured staff\/admin/i);
+  });
+});
+
+describe("isDashboardSession", () => {
+  it("accepts a well-formed current-shape session", () => {
+    expect(isDashboardSession(makeSession())).toBe(true);
+  });
+
+  it("rejects the pre-multi-guild session shape (flat roles[], no guilds/activeGuildId)", () => {
+    // A real cookie payload captured from a session written before the multi-guild
+    // rollout — still HMAC-valid (SESSION_SECRET unchanged), but structurally stale.
+    const staleSession = {
+      discordUserId: "613530842177994772",
+      username: "mooreoff",
+      avatar: "58207b474befc3da5478041c696a5fb5",
+      roles: ["1191001315262861392"],
+      createdAt: 1785421550698,
+    };
+    expect(isDashboardSession(staleSession)).toBe(false);
+  });
+
+  it("rejects garbage/non-object payloads", () => {
+    expect(isDashboardSession(null)).toBe(false);
+    expect(isDashboardSession(undefined)).toBe(false);
+    expect(isDashboardSession("not an object")).toBe(false);
+    expect(isDashboardSession(42)).toBe(false);
+  });
+
+  it("rejects a session missing activeGuildId", () => {
+    const session = makeSession();
+    const { activeGuildId: _activeGuildId, ...withoutActiveGuildId } = session;
+    expect(isDashboardSession(withoutActiveGuildId)).toBe(false);
+  });
+
+  it("rejects a session where guilds isn't an array", () => {
+    expect(isDashboardSession({ ...makeSession(), guilds: "g1" })).toBe(false);
   });
 });

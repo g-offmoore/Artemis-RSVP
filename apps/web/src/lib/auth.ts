@@ -38,10 +38,31 @@ export async function readSession(): Promise<DashboardSession | null> {
   if (!safeEqual(signature, expected)) return null;
 
   try {
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as DashboardSession;
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return isDashboardSession(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * A validly-signed cookie from before a session-shape change (e.g. the old flat
+ * `roles: string[]` shape, pre-multi-guild) still has a valid HMAC signature since
+ * SESSION_SECRET didn't change — but it's missing fields the app now depends on
+ * (activeGuildId, guilds). Without this check it parses "successfully" into a
+ * DashboardSession-shaped object with undefined fields, which then crashes deep in
+ * a Server Component render instead of failing closed here. Treat unrecognized
+ * shapes as no session, so requireSession() sends the user back through login.
+ */
+export function isDashboardSession(value: unknown): value is DashboardSession {
+  if (typeof value !== "object" || value === null) return false;
+  const session = value as Record<string, unknown>;
+  return (
+    typeof session.discordUserId === "string" &&
+    typeof session.activeGuildId === "string" &&
+    typeof session.isPlatformAdmin === "boolean" &&
+    Array.isArray(session.guilds)
+  );
 }
 
 export async function writeSession(session: DashboardSession) {
