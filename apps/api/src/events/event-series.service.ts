@@ -201,6 +201,13 @@ export class EventSeriesService {
         });
       }
 
+      const signupOpensAt = series.signupOpenHoursBefore
+        ? new Date(startAt.getTime() - series.signupOpenHoursBefore * 60 * 60 * 1000)
+        : undefined;
+      const signupClosesAt = new Date(
+        startAt.getTime() - series.signupCloseHoursBefore * 60 * 60 * 1000,
+      );
+
       const event = await this.events.create({
         guildId: series.guildId,
         channelId: series.defaultChannelId,
@@ -211,6 +218,8 @@ export class EventSeriesService {
         gameSystem: series.defaultGameSystem,
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
+        signupOpensAt: signupOpensAt?.toISOString(),
+        signupClosesAt: signupClosesAt.toISOString(),
         shortageAlertHoursBefore: series.shortageAlertHoursBefore ?? undefined,
         createdByDiscordId: series.createdByDiscordId,
         seriesId: series.id,

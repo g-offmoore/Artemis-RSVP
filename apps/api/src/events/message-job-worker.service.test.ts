@@ -16,6 +16,7 @@ function makeService(event: Record<string, unknown>) {
     {} as never, // MessageJobsService — unused by dispatchJob
     prisma as never,
     {} as never, // EventsService — unused by PREFLIGHT
+    {} as never, // EventSeriesService — unused by PREFLIGHT
     {} as never, // DiscordRoleService — unused by PREFLIGHT
   );
   return service;

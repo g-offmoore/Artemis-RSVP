@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { MetricsService } from "../metrics/metrics.service.js";
 
 type DiscordEmbed = {
   title: string;
@@ -28,7 +29,10 @@ type DiscordComponent = {
 export class DiscordEventPostService {
   private readonly logger = new Logger(DiscordEventPostService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly metrics: MetricsService,
+  ) {}
 
   async publishEventPost(eventId: string, actorDiscordId: string) {
     const token = process.env.DISCORD_TOKEN;
@@ -43,6 +47,7 @@ export class DiscordEventPostService {
       include: {
         tables: true,
         participants: true,
+        eventType: true,
       },
     });
     if (!event) throw new NotFoundException("Event not found");
@@ -97,6 +102,7 @@ export class DiscordEventPostService {
 
       return { ok: true, channelId: event.channelId, messageId };
     } catch (error) {
+      this.metrics.discordFailures.inc({ operation: "post_publish" });
       await this.prisma.client.auditLog.create({
         data: {
           guildId: event.guildId,
@@ -204,12 +210,17 @@ function eventEmbed(event: {
 }
 
 // Returns two action rows matching the bot's eventButtons layout.
+// Cancelled events get no components — stale buttons must not remain clickable.
 // Row 1: signup buttons; Row 2: Backup DM signup + Cancel RSVP.
 // (rules.md §5.4, §7.4, §13.2)
 function eventButtons(event: {
   id: string;
   gameSystem: string;
+  status: string;
+  eventType: { allowsGuests: boolean } | null;
 }): DiscordComponent[] {
+  if (event.status === "CANCELLED") return [];
+
   const vocabulary = eventVocabulary(event);
   const row1 = vocabulary.usesDndCategories
     ? [
@@ -218,8 +229,11 @@ function eventButtons(event: {
       ]
     : [button(`rsvp:${event.id}:MIXED`, "RSVP", 3)];
 
+  if (event.eventType?.allowsGuests !== false) {
+    row1.push(button(`guest:${event.id}`, "Guests", 2));
+  }
+
   row1.push(
-    button(`guest:${event.id}`, "Guests", 2),
     button(`host:${event.id}`, vocabulary.hostButtonLabel, 2),
     button(`assignment:${event.id}`, "My Assignment", 2),
   );

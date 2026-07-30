@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { MetricsService } from "../metrics/metrics.service.js";
 
 /** Returned to callers so they can show remediation state in the web UI. */
 export type EventRoleResult =
@@ -10,7 +11,10 @@ export type EventRoleResult =
 export class DiscordRoleService {
   private readonly logger = new Logger(DiscordRoleService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly metrics: MetricsService,
+  ) {}
 
   /**
    * Idempotent: creates the PLAYER Discord role for an event and persists an
@@ -81,6 +85,7 @@ export class DiscordRoleService {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.warn({ err, eventId: event.id }, "Failed to create Discord role for event");
+      this.metrics.discordFailures.inc({ operation: "role_create" });
 
       await this.upsertFailedRole(event, error);
       await this.notifyOrganizerOfRoleFailure(token, event, error);
@@ -176,6 +181,7 @@ export class DiscordRoleService {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.warn({ err, eventId: event.id }, "Failed to create Discord thread for event");
+      this.metrics.discordFailures.inc({ operation: "thread_create" });
       await this.notifyOrganizerOfRoleFailure(token, event, `Event thread creation failed: ${error}`);
       return { ok: false, error };
     }

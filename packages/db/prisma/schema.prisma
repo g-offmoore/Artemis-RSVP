@@ -361,14 +361,32 @@ model PlayerProfile {
   @@index([guildId, displayName])
 }
 
-// TODO(product-feedback): Persistent campaigns / mini-arcs need a durable table
-// concept that can span multiple event occurrences and influence priority.
+// Persistent campaigns / mini-arcs that span multiple event occurrences.
+// Players who RSVPed with a campaignId get seat priority for the next
+// session running that same campaign (assignment algorithm continuity weight).
+model Campaign {
+  id               String       @id @default(cuid())
+  guildId          String
+  title            String
+  description      String?
+  status           String       @default("ACTIVE")
+  dmDiscordUserId  String?
+  tables           EventTable[]
+  rsvps            RSVP[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([guildId, status])
+}
+
 model EventTable {
   id                  String             @id @default(cuid())
   eventId             String
   event               Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
   ambassadorProfileId String?
   ambassadorProfile   AmbassadorProfile? @relation(fields: [ambassadorProfileId], references: [id])
+  campaignId          String?
+  campaign            Campaign?          @relation(fields: [campaignId], references: [id])
   title               String
   tableType           PlayerCategory     @default(MIXED)
   softCap             Int                @default(6)
@@ -393,6 +411,8 @@ model RSVP {
   primaryDiscordUserId String
   playerProfileId      String?
   playerProfile        PlayerProfile?     @relation(fields: [playerProfileId], references: [id])
+  campaignId           String?
+  campaign             Campaign?          @relation(fields: [campaignId], references: [id])
   selectedCategory     PlayerCategory     @default(NORMAL)
   signupRole           SignupRole          @default(PLAYER)
   status               RSVPStatus         @default(GOING)

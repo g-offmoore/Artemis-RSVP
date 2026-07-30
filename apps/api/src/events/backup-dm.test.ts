@@ -169,7 +169,7 @@ describe("EventsService guest limit", () => {
           findUnique: vi.fn().mockResolvedValue({
             id: "ev1",
             guildId: "g1",
-            eventType: { maxGuestsPerRsvp: 3 },
+            eventType: { maxGuestsPerRsvp: 3, allowsGuests: true },
           }),
         },
       },
