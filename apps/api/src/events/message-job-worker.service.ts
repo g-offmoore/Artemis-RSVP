@@ -105,7 +105,7 @@ export class MessageJobWorkerService implements OnModuleInit {
         break;
       case "ASSIGNMENT_LOCK":
         // P0: run and lock final assignments T-1h before event start (rules.md §11.1).
-        await this.runAssignmentLock(job);
+        await this.runAssignmentLock(job, token);
         break;
       case "BACKUP_DM_FOLLOW_UP":
         // Fires 1h after the T-3h backup DM ask; notifies organizer if no one accepted.
@@ -305,6 +305,7 @@ export class MessageJobWorkerService implements OnModuleInit {
 
   private async runAssignmentLock(
     job: { id: string; eventId: string },
+    token: string,
   ) {
     this.logger.log(`Running assignment lock for event ${job.eventId} (scheduled job ${job.id})`);
     try {
@@ -322,6 +323,64 @@ export class MessageJobWorkerService implements OnModuleInit {
       }
       throw err;
     }
+
+    // Send individual assignment DMs to confirmed participants (fire-and-forget).
+    void this.sendAssignmentNotifications(job.eventId, token).catch((err) =>
+      this.logger.warn({ err, eventId: job.eventId }, "Failed to send assignment notifications"),
+    );
+  }
+
+  private async sendAssignmentNotifications(eventId: string, token: string) {
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+      include: {
+        tables: { include: { ambassadorProfile: { select: { displayName: true } } } },
+        participants: {
+          where: { assignmentEligible: true, participantType: "PRIMARY" },
+          include: {
+            assignments: {
+              where: { status: { in: ["CONFIRMED_SEATED", "ASSIGNED"] } },
+              select: { eventTableId: true },
+            },
+          },
+        },
+      },
+    });
+    if (!event) return;
+
+    const tableById = new Map(event.tables.map((t) => [t.id, t]));
+    const startTs = discordTs(event.startAt, "F");
+    const relTs = discordTs(event.startAt, "R");
+
+    const notifiable = event.participants.filter(
+      (p): p is typeof p & { discordUserId: string } => typeof p.discordUserId === "string",
+    );
+
+    await Promise.allSettled(
+      notifiable.map(async (p) => {
+        const assignment = p.assignments[0];
+        let content: string;
+        if (assignment?.eventTableId) {
+          const table = tableById.get(assignment.eventTableId);
+          const dmLine = table?.ambassadorProfile?.displayName
+            ? ` (DM: **${table.ambassadorProfile.displayName}**)`
+            : "";
+          content =
+            `✅ **Your table assignment — ${event.title}**\n\n` +
+            `You are confirmed for **${table?.title ?? "your table"}**${dmLine}.\n` +
+            `Event starts ${startTs} (${relTs})\n\n` +
+            `_Check the event thread for the full seating roster._`;
+        } else {
+          content =
+            `📋 **Waitlist notice — ${event.title}**\n\n` +
+            `Assignments have been finalized and you are currently on the waitlist.\n` +
+            `Event starts ${startTs} (${relTs})\n\n` +
+            `You may still be seated if another player cancels before the event starts.`;
+        }
+        await discordDmPost(token, p.discordUserId, { content });
+        this.logger.log(`Sent assignment notification to ${p.discordUserId} for event ${eventId}`);
+      }),
+    );
   }
 
   // ─── CUSTOM (T-3h backup DM consent ask) ─────────────────────────────────
