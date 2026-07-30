@@ -44,7 +44,7 @@ Optional URLs such as `DISCORD_OPS_WEBHOOK_URL` may be blank; the API and bot no
 
 ## Nanode Deployment Sequence
 
-Use `scripts/deploy-nanode.sh` on the host. It defaults to `/opt/artemis` and `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
+Use `scripts/deploy-nanode.sh` on the host. It defaults to `/opt/artemis/repo` and `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
 
 1. Validate Compose configuration with the production env file.
 2. Build images on the host.
@@ -58,18 +58,22 @@ Use `scripts/deploy-nanode.sh` on the host. It defaults to `/opt/artemis` and `/
 10. Verify bot gateway connection and command health.
 11. Prune old images after successful deployment.
 
+Steps 4/6/8/9 use `docker compose up -d --force-recreate --no-deps <service>`, not a bare `up -d`. A bare `up -d` only recreates a container if Compose's own heuristic detects a config/image change — on 2026-07-30 this silently left `web`/`bot`/`caddy` running two-month-old images after a "successful" deploy, because the health checks that followed couldn't tell a freshly-recreated container apart from one that was never touched. `--force-recreate` removes that ambiguity entirely.
+
 Equivalent manual commands:
 
 ```bash
-cd /opt/artemis
+cd /opt/artemis/repo
 docker compose --env-file /etc/artemis/production.env config
 docker compose --env-file /etc/artemis/production.env build
 docker compose --env-file /etc/artemis/production.env --profile migrate run --rm migrate
-docker compose --env-file /etc/artemis/production.env up -d api
+docker compose --env-file /etc/artemis/production.env up -d --force-recreate --no-deps api
 docker compose --env-file /etc/artemis/production.env exec -T api node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-docker compose --env-file /etc/artemis/production.env up -d web caddy bot
+docker compose --env-file /etc/artemis/production.env up -d --force-recreate --no-deps web caddy bot
 docker compose --env-file /etc/artemis/production.env ps
 ```
+
+To confirm a service actually got a new container (not just "healthy," which a stale container also reports), compare `docker compose ps` output before and after — the `CREATED` column should read "seconds ago," not weeks.
 
 Before deploying from a workstation or CI runner, run the Docker smoke path with placeholder env values:
 
