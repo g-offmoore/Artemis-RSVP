@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { JobsService } from "../jobs/jobs.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
 import { EventsService } from "./events.service.js";
+import { EventSeriesService } from "./event-series.service.js";
 import { DiscordRoleService } from "./discord-role.service.js";
 
 const JOB_NAME = "artemis.message-job-poll";
@@ -24,6 +25,7 @@ export class MessageJobWorkerService implements OnModuleInit {
     private readonly messageJobs: MessageJobsService,
     private readonly prisma: PrismaService,
     private readonly events: EventsService,
+    private readonly series: EventSeriesService,
     private readonly discordRole: DiscordRoleService,
   ) {}
 
@@ -69,6 +71,12 @@ export class MessageJobWorkerService implements OnModuleInit {
     if (processed > 0 || failed > 0) {
       this.logger.log(`Message job poll: processed=${processed} failed=${failed}`);
     }
+
+    // Auto-generate next series occurrence when the signup window for the
+    // latest occurrence is about to open and no future occurrence exists yet.
+    await this.autoGenerateSeriesOccurrences().catch((err) => {
+      this.logger.warn({ err }, "Failed during auto-generate series occurrences");
+    });
 
     // §12.6: Clean up expired Discord event roles on each cron tick.
     await this.discordRole.processExpiredRoles().catch((err) => {
@@ -381,6 +389,55 @@ export class MessageJobWorkerService implements OnModuleInit {
         this.logger.log(`Sent assignment notification to ${p.discordUserId} for event ${eventId}`);
       }),
     );
+  }
+
+  // ─── Auto-generate series occurrences ────────────────────────────────────
+  // Runs on every cron tick. Finds series where the latest non-cancelled
+  // upcoming event's signup window has opened (signupOpensAt <= now) and there
+  // are no events scheduled beyond it, then generates the next occurrence so
+  // the signup window for the following session stays continuously open.
+
+  private async autoGenerateSeriesOccurrences() {
+    const now = new Date();
+
+    // Find series that have at least one upcoming non-cancelled event whose
+    // signup window has already opened (i.e., the series is "live").
+    const seriesWithLiveEvent = await this.prisma.client.eventSeries.findMany({
+      where: {
+        events: {
+          some: {
+            status: { not: "CANCELLED" },
+            startAt: { gte: now },
+            signupOpensAt: { lte: now },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    for (const s of seriesWithLiveEvent) {
+      // Check whether there's already a future event beyond the current signup window.
+      const futureCount = await this.prisma.client.event.count({
+        where: {
+          seriesId: s.id,
+          status: { not: "CANCELLED" },
+          startAt: { gte: now },
+        },
+      });
+
+      // Generate the next occurrence only if there's exactly 1 upcoming event
+      // (the current one) and no further occurrences queued.
+      if (futureCount > 1) continue;
+
+      try {
+        const result = await this.series.generate(s.id, { count: 1 });
+        this.logger.log(
+          `Auto-generated ${result.created} occurrence(s) for series ${s.id}: ${result.events.map((e) => e.startAt.toISOString()).join(", ")}`,
+        );
+      } catch (err) {
+        this.logger.warn({ err, seriesId: s.id }, "Failed to auto-generate series occurrence");
+      }
+    }
   }
 
   // ─── CUSTOM (T-3h backup DM consent ask) ─────────────────────────────────

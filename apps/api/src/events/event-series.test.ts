@@ -153,6 +153,8 @@ describe("EventSeriesService.generate integration (mocked)", () => {
       defaultDescription: null,
       defaultImageUrl: null,
       shortageAlertHoursBefore: null,
+      signupOpenHoursBefore: 168,
+      signupCloseHoursBefore: 1,
       name: "Test",
       createdByDiscordId: "u1",
       eventType: {
