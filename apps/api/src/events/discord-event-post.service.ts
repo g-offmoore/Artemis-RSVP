@@ -204,12 +204,16 @@ function eventEmbed(event: {
 }
 
 // Returns two action rows matching the bot's eventButtons layout.
+// Cancelled events get no components — stale buttons must not remain clickable.
 // Row 1: signup buttons; Row 2: Backup DM signup + Cancel RSVP.
 // (rules.md §5.4, §7.4, §13.2)
 function eventButtons(event: {
   id: string;
   gameSystem: string;
+  status: string;
 }): DiscordComponent[] {
+  if (event.status === "CANCELLED") return [];
+
   const vocabulary = eventVocabulary(event);
   const row1 = vocabulary.usesDndCategories
     ? [

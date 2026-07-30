@@ -500,6 +500,7 @@ async function handleButton(interaction: Interaction & { customId: string }) {
           : interaction.user.username,
       selectedCategory,
       source: "discord",
+      memberDiscordRoleIds: extractMemberRoleIds(interaction.member),
     });
     await interaction.editReply({
       content: vocabulary.usesDndCategories
@@ -692,6 +693,7 @@ async function handleButton(interaction: Interaction & { customId: string }) {
         selectedCategory: vocabulary.usesDndCategories ? "NORMAL" : "MIXED",
         signupRole: "BACKUP_DM",
         source: "discord",
+        memberDiscordRoleIds: extractMemberRoleIds(interaction.member),
       });
       await interaction.editReply({
         content:
@@ -918,6 +920,7 @@ async function handleModal(interaction: Interaction & { customId: string }) {
       softCap,
       hardCap,
       description: optionalModalValue(interaction, "description"),
+      memberDiscordRoleIds: extractMemberRoleIds(interaction.member),
     });
 
     await interaction.editReply({
@@ -965,7 +968,10 @@ function eventEmbed(event: any) {
 // Returns two action rows so we can fit Cancel RSVP and Backup DM alongside
 // the existing signup buttons (rules.md §7.4 requires a clear cancel path;
 // §5.4 requires Backup DM as a first-class Discord UI path).
+// Cancelled events return no rows — stale buttons must not remain clickable.
 function eventButtons(event: any): ActionRowBuilder<ButtonBuilder>[] {
+  if (event.status === "CANCELLED") return [];
+
   const vocabulary = eventVocabulary(event);
 
   const row1Buttons = vocabulary.usesDndCategories
@@ -1184,6 +1190,21 @@ function optionalModalValue(
 ) {
   const value = interaction.fields.getTextInputValue(customId).trim();
   return value || undefined;
+}
+
+// Extracts the member's Discord role IDs for API eligibility checks.
+// Works for both GuildMember (.roles.cache Collection) and
+// APIInteractionGuildMember (.roles string[]).
+function extractMemberRoleIds(member: unknown): string[] {
+  if (!member || typeof member !== "object") return [];
+  const roles = (member as Record<string, unknown>).roles;
+  if (!roles) return [];
+  if (Array.isArray(roles)) return roles as string[];
+  const cache = (roles as Record<string, unknown>).cache;
+  if (cache && typeof (cache as Map<string, unknown>).keys === "function") {
+    return [...(cache as Map<string, unknown>).keys()];
+  }
+  return [];
 }
 
 function userFacingError(error: unknown) {
