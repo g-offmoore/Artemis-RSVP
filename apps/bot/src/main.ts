@@ -558,6 +558,9 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   // only (rules.md §5.1, §11.4), and influence assignment only after hard
   // constraints, eligibility, and capacity are satisfied.
   if (action === "prefs") {
+    // TODO(product-feedback): Preferences should support configurable targets
+    // such as campaign, persistent table, game system, play category, and
+    // preferred players, not just fixed user select menus.
     const preferPlayerMenu = new UserSelectMenuBuilder()
       .setCustomId(`pref-prefer-player:${eventId}`)
       .setPlaceholder("Players I'd like to sit with")
@@ -594,6 +597,8 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   }
 
   if (action === "dm" || action === "host") {
+    // TODO(product-feedback): Host signup modals should be generated from
+    // event/series configuration so each program can ask its own questions.
     const event = await api.getEvent(eventId);
     const vocabulary = eventVocabulary(event);
     const modal = new ModalBuilder()

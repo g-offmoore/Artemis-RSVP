@@ -48,6 +48,8 @@ const eventDateSchema = z.preprocess(
   z.date({ error: "Use a full valid event date and time." }),
 );
 
+// TODO(product-feedback): Replace this fixed D&D category schema with
+// configurable categories per game system or event series.
 export const playerCategorySchema = z.enum(["NORMAL", "HEROIC", "MIXED"]);
 export type PlayerCategory = z.infer<typeof playerCategorySchema>;
 
@@ -76,6 +78,9 @@ export const attendanceStatusSchema = z.enum([
 ]);
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>;
 
+// TODO(product-feedback): Participation roles need to be configurable per
+// series/program, including apprentice GM, observer, campaign participant, and
+// custom roles.
 export const signupRoleSchema = z.enum([
   "PLAYER",
   "TABLE_DM",
@@ -523,6 +528,10 @@ export const tableCreateSchema = z
   });
 export type TableCreateInput = z.infer<typeof tableCreateSchema>;
 
+// TODO(product-feedback): Table/GM signup should derive capacity from
+// configured per-system defaults while allowing authorized per-occurrence
+// overrides for the chosen system, category, campaign, and table.
+
 // ─── Eligibility rule schema ───────────────────────────────────────────────
 
 export const eligibilityRuleSchema = z.object({
@@ -678,6 +687,9 @@ export function assignParticipantsToTables(
   participants: AssignmentParticipant[],
   tables: AssignmentTable[],
 ): AssignmentResult {
+  // TODO(product-feedback): Add explicit priority scoring for preferred GM,
+  // preferred player/party, campaign, persistent table, game system, and play
+  // category before otherwise compatible no-preference players.
   const warnings: AssignmentWarning[] = [];
   const decisions: AssignmentDecision[] = [];
   const counts = new Map<string, number>();

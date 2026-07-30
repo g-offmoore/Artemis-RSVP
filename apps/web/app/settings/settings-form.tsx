@@ -23,6 +23,9 @@ export function SettingsForm({
 
   const joinIds = (ids: string[] | undefined) => (ids ?? []).join("\n");
 
+  // TODO(product-feedback): Replace raw Discord snowflake text fields with
+  // dashboard selectors that resolve guild channels and roles by recognizable
+  // names.
   const isSnowflake = (value: string) => /^\d{17,20}$/.test(value.trim());
   const isTimezoneLike = (value: string) => /^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(value.trim());
 

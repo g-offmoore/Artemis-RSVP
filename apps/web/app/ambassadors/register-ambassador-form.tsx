@@ -33,6 +33,9 @@ export function RegisterAmbassadorForm() {
       </div>
       <div className="field">
         <label>Default Table Type</label>
+        {/* TODO(product-feedback): Replace fixed table type options with
+        configurable categories per game system/series. Until then, this UI
+        should stay aligned with the domain PlayerCategory enum. */}
         <select name="defaultTableType" defaultValue="MIXED">
           <option value="MIXED">Mixed</option>
           <option value="AL_LEGAL">AL Legal</option>

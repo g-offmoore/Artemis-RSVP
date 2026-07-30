@@ -142,6 +142,8 @@ export class MessageJobWorkerService implements OnModuleInit {
     job: { id: string; eventId: string; targetId: string },
     token: string,
   ) {
+    // TODO(product-feedback): Add earlier two-to-three-day staffing alerts with
+    // actionable capacity totals and additional-DM estimates, not only T-24h.
     const event = await this.prisma.client.event.findUnique({
       where: { id: job.eventId },
       include: {

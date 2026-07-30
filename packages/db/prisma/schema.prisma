@@ -20,6 +20,8 @@ enum EventStatus {
   ARCHIVED
 }
 
+// TODO(product-feedback): Replace this fixed D&D-oriented track enum with
+// configurable category sets per game system or event series.
 enum PlayerCategory {
   NORMAL
   HEROIC
@@ -39,6 +41,8 @@ enum RSVPStatus {
   REMOVED
 }
 
+// TODO(product-feedback): Move participation roles to configurable per-series
+// role definitions instead of growing this hard-coded enum for every program.
 enum SignupRole {
   PLAYER
   TABLE_DM
@@ -188,6 +192,9 @@ model GuildSettings {
   updatedAt                DateTime @updatedAt
 }
 
+// TODO(product-feedback): Series-level configuration should own inherited
+// channels, roles, permissions, eligibility, notifications, assignment defaults,
+// and richer recurrence such as biweekly or alternating programs.
 model EventType {
   id                             String        @id @default(cuid())
   guildId                        String
@@ -214,6 +221,8 @@ model EventType {
   @@index([guildId])
 }
 
+// TODO(product-feedback): Add every-other-week and alternating-program support,
+// plus automatic next-occurrence publication and post-event next-RSVP prompts.
 model EventSeries {
   id                     String    @id @default(cuid())
   guildId                String
@@ -298,6 +307,8 @@ model Event {
   @@index([status, startAt])
 }
 
+// TODO(product-feedback): Store configured per-system GM capacity defaults and
+// allow authorized per-occurrence overrides for the chosen system/category/table.
 model AmbassadorProfile {
   id                   String            @id @default(cuid())
   guildId              String
@@ -344,6 +355,8 @@ model PlayerProfile {
   @@index([guildId, displayName])
 }
 
+// TODO(product-feedback): Persistent campaigns / mini-arcs need a durable table
+// concept that can span multiple event occurrences and influence priority.
 model EventTable {
   id                  String             @id @default(cuid())
   eventId             String
@@ -467,6 +480,8 @@ model AttendanceRecord {
   @@index([eventId, status])
 }
 
+// TODO(product-feedback): Implement the end-to-end feedback request workflow;
+// current support is mostly schema/settings-level.
 model FeedbackRequest {
   id                  String             @id @default(cuid())
   eventId             String
@@ -529,6 +544,8 @@ model EventMessageJob {
 
 // Per-event Discord role requirements for each signup role type.
 // Server enforces these; UI may hide unavailable options.
+// TODO(product-feedback): Allow these rules to be defined once at series scope
+// and inherited by generated occurrences.
 model EventEligibilityRule {
   id                     String     @id @default(cuid())
   eventId                String
@@ -579,6 +596,8 @@ model EventSeatingGroupMember {
 // Per-event player preferences: prefer/avoid DM or other player.
 // Avoid constraints are hard blocks; prefer constraints are soft scoring.
 // Visibility is organizer_only to protect privacy.
+// TODO(product-feedback): Expand preference targets to specific GM, campaign,
+// persistent table, game system, play category, and preferred players.
 model EventSignupPreference {
   id             String             @id @default(cuid())
   eventId        String
