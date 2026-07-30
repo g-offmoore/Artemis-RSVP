@@ -862,7 +862,7 @@ export class EventsService {
       where: { id: eventId },
       include: {
         tables: { include: { assignments: true } },
-        participants: { include: { assignments: true } },
+        participants: { include: { assignments: true, rsvp: { select: { campaignId: true } } } },
         seatingGroups: { include: { members: true } },
       },
     });
@@ -947,24 +947,41 @@ export class EventsService {
       }
     }
 
+    // Campaign continuity: participants whose RSVP references a campaign get
+    // soft preference for the table(s) running that same campaign this session.
+    const campaignTableIds = new Map<string, string[]>();
+    for (const table of tables) {
+      if (table.campaignId) {
+        const ids = campaignTableIds.get(table.campaignId) ?? [];
+        ids.push(table.id);
+        campaignTableIds.set(table.campaignId, ids);
+      }
+    }
+
     const engineParticipants = participants
       .filter((p) => p.assignmentEligible)
       // Backup DMs who have been pulled to DM role are excluded from player seating.
       .filter((p) => p.backupDmStatus !== "BACKUP_PULLED_TO_DM")
-      .map((p) => ({
-        id: p.id,
-        displayName: p.displayName,
-        // Seating group overrides take precedence over default partyKey.
-        partyKey: seatingGroupPartyKey.get(p.id) ?? p.partyKey,
-        category: p.playerCategory,
-        lockedTableId:
-          p.assignments.find(
-            (a) => a.locked && a.status === "ASSIGNED",
-          )?.eventTableId ?? null,
-        avoidParticipantIds: avoidParticipantMap.get(p.id),
-        avoidTableIds: avoidTableMap.get(p.id),
-        preferredTableIds: preferTableMap.get(p.id),
-      }));
+      .map((p) => {
+        const campaignPreferences = p.rsvp?.campaignId
+          ? (campaignTableIds.get(p.rsvp.campaignId) ?? [])
+          : [];
+        const existing = preferTableMap.get(p.id) ?? [];
+        return {
+          id: p.id,
+          displayName: p.displayName,
+          // Seating group overrides take precedence over default partyKey.
+          partyKey: seatingGroupPartyKey.get(p.id) ?? p.partyKey,
+          category: p.playerCategory,
+          lockedTableId:
+            p.assignments.find(
+              (a) => a.locked && a.status === "ASSIGNED",
+            )?.eventTableId ?? null,
+          avoidParticipantIds: avoidParticipantMap.get(p.id),
+          avoidTableIds: avoidTableMap.get(p.id),
+          preferredTableIds: [...new Set([...campaignPreferences, ...existing])],
+        };
+      });
 
     const engineTables = tables.map((t) => ({
       id: t.id,
