@@ -75,6 +75,10 @@ export class EventSeriesService {
    * Past events are never touched. Only WEEKLY recurrence is supported in v1.
    * Occurrence times are constructed in the guild's configured IANA timezone so
    * they are DST-safe across spring/fall transitions.
+   *
+   * TODO(product-feedback): Support biweekly and alternating programs, inherit
+   * series-scoped permissions/channels/notifications/assignment rules, and
+   * publish or announce the correct next RSVP automatically.
    */
   async generate(seriesId: string, body: unknown) {
     const { count } = seriesGenerateSchema.parse(body ?? {});

@@ -341,6 +341,8 @@ export class EventsService {
     if (!event) throw new NotFoundException("Event not found");
 
     const rule = event.eligibilityRules[0] ?? null;
+    // TODO(product-feedback): requiresApproval is currently surfaced as a flag,
+    // but there is no organizer approval queue/workflow yet.
     return checkEligibility(rule, input.memberDiscordRoleIds);
   }
 
@@ -405,6 +407,10 @@ export class EventsService {
       },
     });
     if (!event) throw new NotFoundException("Event not found");
+
+    // TODO(product-feedback): RSVP inputs are fixed. Replace with configurable
+    // per-event/series questions for systems, categories, campaigns, apprentice
+    // GM availability, and no-preference choices.
 
     // Server-side eligibility enforcement.
     const memberRoleIds =
@@ -658,6 +664,10 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
 
+    // TODO(product-feedback): Automatically rerun assignments, promote
+    // waitlisted users, notify affected users, and refresh Discord displays when
+    // an RSVP is cancelled.
+
     const rsvp = await this.prisma.client.rSVP.update({
       where: {
         eventId_primaryDiscordUserId: {
@@ -716,6 +726,10 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
 
+    // TODO(product-feedback): This is occurrence-specific table registration,
+    // but it still lacks configured per-system defaults and authorized
+    // per-occurrence overrides for the DM's chosen system/category/campaign.
+
     const memberRoleIds =
       Array.isArray((raw as Record<string, unknown>)?.memberDiscordRoleIds)
         ? ((raw as Record<string, unknown>).memberDiscordRoleIds as string[])
@@ -772,6 +786,9 @@ export class EventsService {
       },
     });
 
+    // TODO(product-feedback): Capacity changes from table/DM signup should
+    // trigger assignment reruns, waitlist promotion, user notifications, and
+    // Discord post refresh without a manual /event assign.
     return this.prisma.client.$transaction(async (tx) => {
       const data = {
         title: input.title ?? `${ambassador.displayName}'s Table`,
@@ -876,6 +893,9 @@ export class EventsService {
           preferTableMap.set(sourcePid, arr);
         }
       }
+      // TODO(product-feedback): PREFER_PLAYER is stored but not converted into
+      // a seating priority, and preferences cannot yet target campaign,
+      // persistent table, game system, or play category.
     }
 
     // Build a partyKey override for DO_NOT_SPLIT seating groups.

@@ -96,6 +96,9 @@ export function activeGuildRoles(session: DashboardSession): string[] {
  * IDs (from GuildSettings), not a single deployment-wide allowlist — each store manages
  * its own access. An empty allowlist for a guild means any member of that guild may in.
  */
+// TODO(product-feedback): Add scoped delegated management beyond guild-wide
+// staff/admin, including owner, administrator, event manager, series/table
+// manager, assignment-only, attendance-only, and settings-management scopes.
 export function hasAllowedRoleForGuild(
   memberRoles: string[],
   guildSettings: { staffRoleIds?: string[]; adminRoleIds?: string[] },

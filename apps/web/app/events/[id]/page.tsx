@@ -305,6 +305,9 @@ export default async function EventPage({
 
       {event.seatingGroups && event.seatingGroups.length > 0 && (
         <>
+          {/* TODO(product-feedback): Add player-facing dashboard or Discord
+          flows to create, join, leave, and manage seating groups; this page
+          currently only displays groups returned by the API. */}
           <h2>Seating Groups</h2>
           <table className="table">
             <thead>
