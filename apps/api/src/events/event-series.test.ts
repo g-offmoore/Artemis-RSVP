@@ -142,6 +142,7 @@ describe("EventSeriesService.generate integration (mocked)", () => {
       id: "s1",
       guildId: "g1",
       recurrenceRule: "WEEKLY:FRI",
+      recurrenceAnchorAt: null,
       events: [], // no prior events; start from today
       defaultStartHour: 18,
       defaultStartMinute: 0,
@@ -151,8 +152,23 @@ describe("EventSeriesService.generate integration (mocked)", () => {
       defaultTitle: "Test",
       defaultDescription: null,
       defaultImageUrl: null,
+      shortageAlertHoursBefore: null,
       name: "Test",
       createdByDiscordId: "u1",
+      eventType: {
+        name: "Default",
+        requiresRsvp: true,
+        allowsGuests: true,
+        maxGuestsPerRsvp: 3,
+        requiresAmbassadors: false,
+        requiresTableAssignment: false,
+        usesPlayerCategories: true,
+        createsTemporaryRoles: false,
+        requiresAttendanceConfirmation: false,
+        sendsFeedbackPrompts: false,
+        usesWaitlist: false,
+        allowsNameOnlyWalkIns: false,
+      },
     });
 
     const eventsService = {

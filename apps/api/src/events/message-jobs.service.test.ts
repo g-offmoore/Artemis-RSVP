@@ -24,6 +24,7 @@ const event = {
   startAt: new Date("2026-08-01T18:00:00Z"),
   endAt: new Date("2026-08-01T22:00:00Z"),
   createdByDiscordId: "creator-1",
+  shortageAlertHoursBefore: null,
 };
 
 describe("MessageJobsService.scheduleEventMessages", () => {

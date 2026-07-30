@@ -22,6 +22,7 @@ export function EditEventForm({
   seriesDefaultChannelId,
   defaultStatus,
   defaultEventType,
+  defaultShortageAlertHours,
 }: {
   eventId: string;
   defaultTitle: string;
@@ -38,6 +39,7 @@ export function EditEventForm({
   seriesDefaultChannelId?: string;
   defaultStatus?: string;
   defaultEventType?: string;
+  defaultShortageAlertHours?: number | null;
 }) {
   const [state, formAction, pending] = useActionState(
     updateEventAction,
@@ -132,6 +134,18 @@ export function EditEventForm({
             rows={3}
             defaultValue={defaultDescription ?? ""}
           />
+        </label>
+        <label>
+          Shortage alert (hours before)
+          <input
+            name="shortageAlertHoursBefore"
+            type="number"
+            min={1}
+            max={168}
+            defaultValue={defaultShortageAlertHours ?? ""}
+            placeholder="24 (default)"
+          />
+          <small className="muted">Organizer preflight DM fires N hours before start. Leave blank for system default (24h).</small>
         </label>
         {seriesId ? (
           <fieldset className="span-all" style={{ border: "1px solid var(--border, #333)", borderRadius: "4px", padding: "0.75rem" }}>

@@ -176,6 +176,7 @@ export async function updateEventAction(
     if (startAt && endAt && endAt <= startAt)
       endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
 
+    const shortageAlertRaw = optionalValueOf(formData, "shortageAlertHoursBefore");
     await artemisApi(`/api/v1/events/${eventId}`, {
       method: "PATCH",
       guildId: session.activeGuildId,
@@ -186,6 +187,7 @@ export async function updateEventAction(
         gameSystem: optionalValueOf(formData, "gameSystem"),
         startAt: startAt?.toISOString(),
         endAt: endAt?.toISOString(),
+        shortageAlertHoursBefore: shortageAlertRaw ? parseInt(shortageAlertRaw, 10) : null,
         actorDiscordId: session.discordUserId,
         applyToFuture: valueOf(formData, "applyToFuture") === "true",
       },

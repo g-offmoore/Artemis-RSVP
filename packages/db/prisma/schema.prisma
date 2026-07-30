@@ -248,9 +248,12 @@ model EventSeries {
   defaultImageUrl        String?
   defaultStartHour       Int       @default(18)
   defaultStartMinute     Int       @default(0)
-  defaultDurationMinutes Int       @default(240)
-  createdByDiscordId     String
-  events                 Event[]
+  defaultDurationMinutes       Int       @default(240)
+  // Configurable shortage-alert offset. When set, the PREFLIGHT organizer DM fires
+  // this many hours before event start instead of the system default (24h).
+  shortageAlertHoursBefore     Int?
+  createdByDiscordId           String
+  events                       Event[]
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -287,6 +290,9 @@ model Event {
   // Backup DM policy
   backupPullMode              BackupPullMode       @default(CONSENT_REQUIRED)
   backupPullDeadline          DateTime?
+  // Per-event override for the PREFLIGHT organizer-alert timing. When null the
+  // series value is used, then the system default of 24h.
+  shortageAlertHoursBefore    Int?
   createdByDiscordId          String
   tables                      EventTable[]
   rsvps                       RSVP[]
