@@ -1194,6 +1194,13 @@ export class EventsService {
         this.logger.warn({ err, eventId }, "Failed to post roster to event thread"),
       );
 
+      // Schedule per-participant assignment notification DMs as durable jobs so
+      // they survive worker restarts and are retried on failure (unlike the
+      // cron-driven path, which otherwise never notifies on a manual lock).
+      await this.messageJobs.scheduleAssignmentNotificationsByEvent(eventId).catch((err) =>
+        this.logger.warn({ err, eventId }, "Failed to schedule assignment notification jobs"),
+      );
+
       return { ok: true, lockedAt, decisions: result.decisions.length, warnings: result.warnings };
     } catch (error) {
       if (error instanceof BadRequestException) throw error;

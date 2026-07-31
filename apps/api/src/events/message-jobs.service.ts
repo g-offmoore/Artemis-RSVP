@@ -16,7 +16,9 @@ type MessageType =
   | "REMINDER"
   | "CUSTOM"
   | "ASSIGNMENT_LOCK"
-  | "BACKUP_DM_FOLLOW_UP";
+  | "BACKUP_DM_FOLLOW_UP"
+  | "ASSIGNMENT_SEATED"
+  | "ASSIGNMENT_WAITLISTED";
 
 type EventForMessageJobs = {
   id: string;
@@ -145,7 +147,7 @@ export class MessageJobsService {
         scheduledFor: params.scheduledFor,
         status: "PENDING",
       },
-      update: { scheduledFor: params.scheduledFor },
+      update: { scheduledFor: params.scheduledFor, status: "PENDING", failedAt: null, lastError: null },
     });
   }
 
@@ -206,6 +208,15 @@ export class MessageJobsService {
     let failed = 0;
 
     for (const job of due) {
+      // Atomic claim: transition PENDING → PROCESSING. If another worker already
+      // claimed this job the updateMany returns count=0 and we skip rather than
+      // double-dispatch the same message.
+      const claim = await this.prisma.client.eventMessageJob.updateMany({
+        where: { id: job.id, status: "PENDING" },
+        data: { status: "PROCESSING" },
+      });
+      if (claim.count === 0) continue;
+
       try {
         await sender(job);
         await this.markSent(job.id);
@@ -218,5 +229,53 @@ export class MessageJobsService {
     }
 
     return { processed, failed };
+  }
+
+  // Create or refresh per-participant ASSIGNMENT_SEATED / ASSIGNMENT_WAITLISTED
+  // jobs so assignment notifications are durable and retryable.  Called from
+  // both the cron-driven assignment lock path and the manual lockAssignments()
+  // API endpoint so neither path can silently skip participant DMs.
+  async scheduleAssignmentNotificationsByEvent(eventId: string): Promise<void> {
+    const participants = await this.prisma.client.eventParticipant.findMany({
+      where: { eventId, assignmentEligible: true, participantType: "PRIMARY" },
+      select: {
+        discordUserId: true,
+        assignments: {
+          where: { status: { in: ["CONFIRMED_SEATED", "ASSIGNED"] } },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+
+    const now = new Date();
+    const notifiable = participants.filter(
+      (p): p is typeof p & { discordUserId: string } => typeof p.discordUserId === "string",
+    );
+
+    if (notifiable.length === 0) return;
+
+    await this.prisma.client.$transaction(
+      notifiable.map((p) => {
+        const messageType: MessageType =
+          p.assignments.length > 0 ? "ASSIGNMENT_SEATED" : "ASSIGNMENT_WAITLISTED";
+        return this.prisma.client.eventMessageJob.upsert({
+          where: {
+            eventId_messageType_targetId: { eventId, messageType, targetId: p.discordUserId },
+          },
+          create: {
+            eventId,
+            messageType,
+            targetType: "USER",
+            targetId: p.discordUserId,
+            scheduledFor: now,
+            status: "PENDING",
+          },
+          update: { scheduledFor: now, status: "PENDING", failedAt: null, lastError: null },
+        });
+      }),
+    );
+
+    this.logger.log(`Scheduled ${notifiable.length} assignment notification job(s) for event ${eventId}`);
   }
 }

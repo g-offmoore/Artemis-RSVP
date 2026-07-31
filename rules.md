@@ -1427,26 +1427,28 @@ If a requested implementation conflicts with this file, stop and flag the confli
 
 ## 25. Current known gaps to close
 
-The following gaps are known from manual testing and should be treated as active remediation targets:
+The following gaps remain open as of the current codebase state. Items that previously appeared here but have since been resolved are removed.
 
-- Event creation failure is visible publicly instead of ephemeral/private.
-- Backup DM signup option is missing.
-- DM can also sign up as player.
-- Organizer warnings are posted publicly.
-- Player preference options are missing.
-- Heroic players can appear seated despite no heroic/mixed table capacity.
-- Web UI can show an event as unpublished after Discord publish.
-- Web UI lacks visibility into DMs, their capacity, and table details.
-- Guest list editing is unclear or unavailable.
-- Cancel signup flow is unclear or broken.
-- Guest registration can exceed allowed count.
-- Guest registration relies too much on open text.
-- Assignment did not run one hour before event.
-- Waitlist messages/alerts are missing or insufficient.
-- Capacity display can show misleading values such as over-capacity without clear waitlist/category explanation.
-- UI allows double publish from web.
+**Registration and signup**
+- Capacity display on the web can show over-capacity without a clear breakdown of waitlisted vs seated per category.
+- Cancel-signup flow is unclear in the Discord UI (players don't know how to remove themselves from a fully-signed event).
 
-These are not isolated bugs. They indicate that RSVP state, capacity/category assignment, notification privacy, and cross-surface canonical state need hardening.
+**Assignment and notifications**
+- Waitlist-to-seated promotion after a cancellation does not automatically fire a new assignment notification DM to the promoted player.
+- The PREFLIGHT T-24h pass surfaces category/capacity warnings but does not surface missing player-preference declarations.
+- Assignment notification DMs are per-job retryable, but a failed delivery is not surfaced to the organizer.
+
+**Web UI and state sync**
+- Web UI lacks per-table DM and capacity visibility for organizers; the event detail page shows totals but not table-level breakdowns.
+- Web UI does not distinguish between players on the waitlist because of category mismatch vs capacity overflow.
+- Double-publish from web is blocked by idempotency but there is no explicit UI confirmation that the re-publish was a no-op vs a real update.
+
+**Signup-options configuration**
+- EventType signup-option overrides (guest limits, ambassador requirement, waitlist mode) are not yet editable from the web; the API endpoints exist but no panel is wired up.
+- Series-level signup-options editing is similarly API-only.
+
+**Multi-guild**
+- Channel picker in the event-create form is not yet implemented; organizers must paste a raw channel ID.
 
 ## 26. Preferred remediation order
 

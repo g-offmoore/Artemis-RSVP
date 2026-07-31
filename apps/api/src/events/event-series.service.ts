@@ -208,22 +208,40 @@ export class EventSeriesService {
         startAt.getTime() - series.signupCloseHoursBefore * 60 * 60 * 1000,
       );
 
-      const event = await this.events.create({
-        guildId: series.guildId,
-        channelId: series.defaultChannelId,
-        title: series.defaultTitle || series.name,
-        description: series.defaultDescription ?? undefined,
-        imageUrl: series.defaultImageUrl ?? undefined,
-        eventType: eventTypeOverrides,
-        gameSystem: series.defaultGameSystem,
-        startAt: startAt.toISOString(),
-        endAt: endAt.toISOString(),
-        signupOpensAt: signupOpensAt?.toISOString(),
-        signupClosesAt: signupClosesAt.toISOString(),
-        shortageAlertHoursBefore: series.shortageAlertHoursBefore ?? undefined,
-        createdByDiscordId: series.createdByDiscordId,
-        seriesId: series.id,
-      });
+      let event: { id: string; startAt: Date };
+      try {
+        event = await this.events.create({
+          guildId: series.guildId,
+          channelId: series.defaultChannelId,
+          title: series.defaultTitle || series.name,
+          description: series.defaultDescription ?? undefined,
+          imageUrl: series.defaultImageUrl ?? undefined,
+          eventType: eventTypeOverrides,
+          gameSystem: series.defaultGameSystem,
+          startAt: startAt.toISOString(),
+          endAt: endAt.toISOString(),
+          signupOpensAt: signupOpensAt?.toISOString(),
+          signupClosesAt: signupClosesAt.toISOString(),
+          shortageAlertHoursBefore: series.shortageAlertHoursBefore ?? undefined,
+          createdByDiscordId: series.createdByDiscordId,
+          seriesId: series.id,
+        });
+      } catch (err) {
+        // P2002 = unique constraint violation: a concurrent worker created this
+        // slot between our idempotency read-check and this insert.  Treat it as
+        // "slot already taken" and advance to the next candidate.
+        if (
+          typeof err === "object" &&
+          err !== null &&
+          "code" in err &&
+          (err as { code: unknown }).code === "P2002"
+        ) {
+          cursor = new Date(occurrenceDate.getTime() + 24 * 60 * 60 * 1000);
+          i--;
+          continue;
+        }
+        throw err;
+      }
 
       created.push({ id: event.id, startAt: event.startAt });
       // Advance cursor past the occurrence just generated (pure ms, no setDate).

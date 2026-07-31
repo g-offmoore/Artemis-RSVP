@@ -121,6 +121,8 @@ enum EventMessageType {
   CUSTOM
   ASSIGNMENT_LOCK
   BACKUP_DM_FOLLOW_UP
+  ASSIGNMENT_SEATED
+  ASSIGNMENT_WAITLISTED
 }
 
 enum MessageTargetType {
@@ -131,6 +133,7 @@ enum MessageTargetType {
 
 enum MessageJobStatus {
   PENDING
+  PROCESSING
   SENT
   FAILED
   SKIPPED
@@ -311,6 +314,7 @@ model Event {
 
   @@index([guildId, startAt])
   @@index([status, startAt])
+  @@index([seriesId, startAt])
 }
 
 // TODO(product-feedback): Store configured per-system GM capacity defaults and
