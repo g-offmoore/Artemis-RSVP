@@ -52,10 +52,10 @@ Use `scripts/deploy-nanode.sh` on the host. It runs from `/opt/artemis/repo` aga
 4. Render Compose config and fail if any `${...}` variable is unresolved.
 5. Build images with the `migrate` profile (this also builds api/web/bot, since they have no `profiles:` restriction).
 6. Run the migration one-shot.
-7. Restart API with `--force-recreate`; fail and dump logs if it doesn't report `healthy` via Docker's own health status.
+7. Restart API with `--force-recreate`; wait up to 180s for Docker's own health status to report `healthy` (polling every 3s), and fail and dump logs on `unhealthy`, a stopped container, or timeout. A single check after a fixed sleep is not enough: the API takes ~10s to pass `/readyz`.
 8. Restart web with `--force-recreate`; same health-status gate.
 9. Restart Caddy with `--force-recreate`.
-10. Restart bot with `--force-recreate`; fail and dump logs if the container isn't in the `running` state after a short grace period (bot has no Docker `HEALTHCHECK` defined, so this checks container state rather than health status).
+10. Restart bot with `--force-recreate`; after a 20s settle period, fail and dump logs unless the container is `running` with a restart count of 0 (bot has no Docker `HEALTHCHECK` defined, so this checks container state, and the restart count catches crash loops that `restart: unless-stopped` would hide).
 11. Show final service status, `docker stats`, memory, and disk usage.
 12. Reminder to run `/ops check` in Discord.
 
