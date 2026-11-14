@@ -27,6 +27,12 @@ import pino from "pino";
 import { ArtemisApi, ArtemisApiError, withGuildContext } from "./api.js";
 import { loadConfig } from "./config.js";
 import { runDiscordOpsCheck } from "./discord-ops.js";
+import {
+  eventButtons,
+  eventEmbed,
+  eventVocabulary,
+  formatDiscordTimestamp,
+} from "./event-post.js";
 
 const config = loadConfig();
 const DEFAULT_EVENT_TIME_ZONE =
@@ -941,110 +947,6 @@ async function handleModal(interaction: Interaction & { customId: string }) {
   }
 }
 
-function eventEmbed(event: any) {
-  const counts = eventCounts(event);
-  const capacity = eventCapacity(event);
-  const vocabulary = eventVocabulary(event);
-  const embed = new EmbedBuilder()
-    .setTitle(event.title)
-    .setDescription(event.description ?? "Store event")
-    .addFields(
-      {
-        name: "When",
-        value: formatDiscordTimeRange(event.startAt, event.endAt),
-      },
-      {
-        name: "Registered",
-        value: `${vocabulary.attendeePlural}: ${counts.players}\nGuests: ${counts.guests}\n${vocabulary.hostPlural}: ${counts.hosts}`,
-        inline: true,
-      },
-      {
-        name: "Capacity",
-        value: capacity.hardCap
-          ? `${counts.players + counts.guests}/${capacity.hardCap} seats\n${capacity.tables} tables`
-          : `No ${vocabulary.hostSingular.toLowerCase()} tables yet`,
-        inline: true,
-      },
-      { name: "Status", value: event.status ?? "SCHEDULED", inline: true },
-      { name: "Event ID", value: event.id, inline: true },
-    );
-
-  if (event.imageUrl) {
-    embed.setImage(event.imageUrl);
-  }
-
-  return embed;
-}
-
-// Returns two action rows so we can fit Cancel RSVP and Backup DM alongside
-// the existing signup buttons (rules.md §7.4 requires a clear cancel path;
-// §5.4 requires Backup DM as a first-class Discord UI path).
-// Cancelled events return no rows — stale buttons must not remain clickable.
-function eventButtons(event: any): ActionRowBuilder<ButtonBuilder>[] {
-  if (event.status === "CANCELLED") return [];
-
-  const vocabulary = eventVocabulary(event);
-
-  const row1Buttons = vocabulary.usesDndCategories
-    ? [
-        new ButtonBuilder()
-          .setCustomId(`rsvp:${event.id}:NORMAL`)
-          .setLabel("RSVP Normal")
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId(`rsvp:${event.id}:HEROIC`)
-          .setLabel("RSVP Heroic")
-          .setStyle(ButtonStyle.Primary),
-      ]
-    : [
-        new ButtonBuilder()
-          .setCustomId(`rsvp:${event.id}:MIXED`)
-          .setLabel("RSVP")
-          .setStyle(ButtonStyle.Success),
-      ];
-
-  if (event.eventType?.allowsGuests !== false) {
-    row1Buttons.push(
-      new ButtonBuilder()
-        .setCustomId(`guest:${event.id}`)
-        .setLabel("Guests")
-        .setStyle(ButtonStyle.Secondary),
-    );
-  }
-
-  row1Buttons.push(
-    new ButtonBuilder()
-      .setCustomId(`host:${event.id}`)
-      .setLabel(vocabulary.hostButtonLabel)
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`assignment:${event.id}`)
-      .setLabel("My Assignment")
-      .setStyle(ButtonStyle.Secondary),
-  );
-
-  // Second row: Backup DM signup, Cancel RSVP, and Preferences (rules.md §5.4, §7.4, §7.5).
-  const row2Buttons = [
-    new ButtonBuilder()
-      .setCustomId(`backup_dm:${event.id}`)
-      .setLabel("Backup DM Signup")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`cancel_rsvp:${event.id}`)
-      .setLabel("Cancel RSVP")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId(`prefs:${event.id}`)
-      .setLabel("Preferences")
-      .setStyle(ButtonStyle.Secondary),
-  ];
-
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(...row1Buttons),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(...row2Buttons),
-  ];
-}
-
 async function replySafely(interaction: Interaction, content: string) {
   if (!interaction.isRepliable()) return;
   if (interaction.deferred && !interaction.replied) {
@@ -1093,92 +995,8 @@ async function refreshEventMessage(interaction: Interaction, eventId: string) {
     });
 }
 
-function eventCounts(event: any) {
-  const participants = Array.isArray(event.participants)
-    ? event.participants.filter(
-        (participant: any) => participant.assignmentEligible !== false,
-      )
-    : [];
-  const tables = activeTables(event);
-  return {
-    players: participants.filter(
-      (participant: any) => participant.participantType === "PRIMARY",
-    ).length,
-    guests: participants.filter(
-      (participant: any) => participant.participantType === "GUEST",
-    ).length,
-    hosts: tables.length,
-  };
-}
-
-function eventCapacity(event: any) {
-  const tables = activeTables(event);
-  return {
-    tables: tables.length,
-    softCap: tables.reduce(
-      (sum: number, table: any) => sum + (table.softCap ?? 0),
-      0,
-    ),
-    hardCap: tables.reduce(
-      (sum: number, table: any) => sum + (table.hardCap ?? 0),
-      0,
-    ),
-  };
-}
-
-function activeTables(event: any) {
-  return Array.isArray(event.tables)
-    ? event.tables.filter(
-        (table: any) => !["CANCELLED", "COMPLETED"].includes(table.status),
-      )
-    : [];
-}
-
-function formatDiscordTimeRange(startAt: string, endAt: string) {
-  return `${formatDiscordTimestamp(startAt, "F")} to ${formatDiscordTimestamp(endAt, "t")}\n${formatDiscordTimestamp(startAt, "R")}`;
-}
-
-function formatDiscordTimestamp(value: string, style: "F" | "R" | "t") {
-  return `<t:${Math.floor(new Date(value).getTime() / 1000)}:${style}>`;
-}
-
 function formatCategory(category: string) {
   return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
-}
-
-function eventVocabulary(event: { gameSystem?: string }) {
-  const gameSystem = event.gameSystem?.trim().toLowerCase() ?? "";
-  if (
-    gameSystem === "d&d" ||
-    gameSystem === "dnd" ||
-    gameSystem.includes("dungeons")
-  ) {
-    return {
-      usesDndCategories: true,
-      attendeePlural: "Players",
-      hostSingular: "DM",
-      hostPlural: "DMs",
-      hostButtonLabel: "DM Signup",
-    };
-  }
-
-  if (gameSystem === "daggerheart") {
-    return {
-      usesDndCategories: false,
-      attendeePlural: "Attendees",
-      hostSingular: "GM",
-      hostPlural: "GMs",
-      hostButtonLabel: "GM Signup",
-    };
-  }
-
-  return {
-    usesDndCategories: false,
-    attendeePlural: "Attendees",
-    hostSingular: "Ambassador",
-    hostPlural: "Ambassadors",
-    hostButtonLabel: "Ambassador Signup",
-  };
 }
 
 function formatTableType(

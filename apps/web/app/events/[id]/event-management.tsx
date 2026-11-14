@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { resolveEventVocabulary } from "@artemis/domain/event-presentation";
 import { AlertTriangle, Lock, Megaphone, Play, Plus, RefreshCw, XCircle } from "lucide-react";
 import {
   ActionState,
@@ -64,7 +65,7 @@ export function EventManagement({
     retryEventRoleAction,
     initialState,
   );
-  const vocabulary = eventVocabulary(gameSystem);
+  const vocabulary = resolveEventVocabulary(gameSystem);
   const playerRole = roles?.find((r) => r.roleType === "PLAYER");
   const roleFailed = playerRole && !playerRole.discordRoleId && playerRole.failedAt;
   const rolePending = playerRole && !playerRole.discordRoleId && !playerRole.failedAt;
@@ -292,15 +293,4 @@ export function EventManagement({
       </form>
     </section>
   );
-}
-
-function eventVocabulary(gameSystem: string) {
-  const value = gameSystem.trim().toLowerCase();
-  if (value === "d&d" || value === "dnd" || value.includes("dungeons")) {
-    return { usesDndCategories: true, hostSingular: "DM" };
-  }
-  if (value === "daggerheart") {
-    return { usesDndCategories: false, hostSingular: "GM" };
-  }
-  return { usesDndCategories: false, hostSingular: "Ambassador" };
 }

@@ -6,6 +6,7 @@ import {
   EventDateTimeInputError,
   parseEventDateTimeParts,
 } from "@artemis/domain";
+import { resolveEventVocabulary } from "@artemis/domain/event-presentation";
 import { artemisApi } from "../src/lib/artemis-api";
 import { requireSession } from "../src/lib/auth";
 
@@ -639,7 +640,7 @@ export async function createTableAction(
 
   try {
     const gameSystem = valueOf(formData, "gameSystem");
-    const vocabulary = eventVocabulary(gameSystem);
+    const vocabulary = resolveEventVocabulary(gameSystem);
     const table = await artemisApi<{
       title: string;
       tableType: string;
@@ -781,15 +782,4 @@ function parseApiValidationMessage(message: string) {
   } catch {
     return undefined;
   }
-}
-
-function eventVocabulary(gameSystem: string) {
-  const value = gameSystem.trim().toLowerCase();
-  if (value === "d&d" || value === "dnd" || value.includes("dungeons")) {
-    return { usesDndCategories: true, hostSingular: "DM" };
-  }
-  if (value === "daggerheart") {
-    return { usesDndCategories: false, hostSingular: "GM" };
-  }
-  return { usesDndCategories: false, hostSingular: "Ambassador" };
 }
