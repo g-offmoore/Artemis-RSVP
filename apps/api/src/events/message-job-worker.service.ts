@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
-import { backupDmCustomId } from "@artemis/domain";
+import { backupDmCustomId, computeAssignmentLockScheduledFor } from "@artemis/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { JobsService } from "../jobs/jobs.service.js";
 import { MessageJobsService } from "./message-jobs.service.js";
@@ -105,7 +105,7 @@ export class MessageJobWorkerService implements OnModuleInit {
         await this.sendBackupDmAsk(job, token);
         break;
       case "ASSIGNMENT_LOCK":
-        // P0: run and lock final assignments T-1h before event start (rules.md §11.1).
+        // P0: run and lock final assignments at the event-policy time (rules.md §11.1).
         await this.runAssignmentLock(job);
         break;
       case "BACKUP_DM_FOLLOW_UP":
@@ -206,7 +206,7 @@ export class MessageJobWorkerService implements OnModuleInit {
     const guestParticipants = event.participants.filter((p) => p.participantType === "GUEST");
     const guestWaitlisted = guestParticipants.filter((p) => !seatedIds.has(p.id)).length;
 
-    const lockAt = new Date(event.startAt.getTime() - 60 * 60 * 1000);
+    const lockAt = computeAssignmentLockScheduledFor(event.startAt, event.assignmentLockOffsetMinutes);
     const lockTs = discordTs(lockAt, "R");
 
     const content =
@@ -219,7 +219,7 @@ export class MessageJobWorkerService implements OnModuleInit {
       (guestWaitlisted > 0 ? ` (${guestWaitlisted} currently waitlisted)` : "") +
       `\n\n**Assignment lock:** ${lockTs}\n\n` +
       `This is a readiness check — nothing is locked yet. You have time to add tables, ` +
-      `recruit backup DMs, or adjust capacity before the T-1h lock.\n` +
+      `recruit backup DMs, or adjust capacity before the configured assignment lock.\n` +
       `_This message is private to you as the event organizer._`;
 
     await discordDmPost(token, job.targetId, { content });
@@ -279,8 +279,7 @@ export class MessageJobWorkerService implements OnModuleInit {
     // Backup DM candidates available.
     const backupCount = event.rsvps.length;
 
-    // Assignment lock is 1h before start (T-1h = assignmentLockOffsetMs).
-    const lockAt = new Date(event.startAt.getTime() - 60 * 60 * 1000);
+    const lockAt = computeAssignmentLockScheduledFor(event.startAt, event.assignmentLockOffsetMinutes);
     const lockTs = discordTs(lockAt, "R");
 
     const trackLines = (Object.entries(byTrack) as Array<[string, { seated: number; waitlisted: number }]>)
@@ -305,8 +304,8 @@ export class MessageJobWorkerService implements OnModuleInit {
     this.logger.log(`Sent organizer warning DM to ${job.targetId} for event ${job.eventId}`);
   }
 
-  // ─── ASSIGNMENT_LOCK (T-1h: lock final assignments) ───────────────────────
-  // Runs and locks assignments exactly 1 hour before event start.
+  // ─── ASSIGNMENT_LOCK (configured event lock time) ──────────────────────
+  // Runs and locks assignments at the scheduled effective lock time.
   // This is a P0 requirement per rules.md §11.1, §11.2.
 
   private async runAssignmentLock(job: { id: string; eventId: string }) {
@@ -314,7 +313,7 @@ export class MessageJobWorkerService implements OnModuleInit {
     try {
       await this.events.lockAssignments(job.eventId, {
         actorDiscordId: "system",
-        reason: "Automatic assignment lock at T-1h",
+        reason: "Automatic assignment lock at scheduled event lock time",
       });
       this.logger.log(`Assignment lock completed for event ${job.eventId}`);
     } catch (err) {

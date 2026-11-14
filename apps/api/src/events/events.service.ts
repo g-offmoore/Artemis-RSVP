@@ -215,6 +215,7 @@ export class EventsService {
           endAt: input.endAt,
           signupOpensAt: input.signupOpensAt,
           signupClosesAt: input.signupClosesAt,
+          assignmentLockOffsetMinutes: input.assignmentLockOffsetMinutes,
           roleCleanupAt,
           shortageAlertHoursBefore: input.shortageAlertHoursBefore ?? null,
           createdByDiscordId: input.createdByDiscordId,
@@ -240,6 +241,7 @@ export class EventsService {
       endAt: event.endAt,
       createdByDiscordId: event.createdByDiscordId,
       shortageAlertHoursBefore: event.shortageAlertHoursBefore,
+      assignmentLockOffsetMinutes: event.assignmentLockOffsetMinutes,
     });
 
     // §12.7: Create the temporary Discord player role at event creation, not publish.
@@ -310,6 +312,7 @@ export class EventsService {
       startAt?: Date;
       endAt?: Date;
       shortageAlertHoursBefore?: number | null;
+      assignmentLockOffsetMinutes?: number;
     } = {};
     if (input.title !== undefined) updates.title = input.title;
     if (input.description !== undefined)
@@ -318,6 +321,8 @@ export class EventsService {
     if (input.gameSystem !== undefined) updates.gameSystem = input.gameSystem;
     if (input.startAt !== undefined) updates.startAt = input.startAt;
     if (input.endAt !== undefined) updates.endAt = input.endAt;
+    if (input.assignmentLockOffsetMinutes !== undefined)
+      updates.assignmentLockOffsetMinutes = input.assignmentLockOffsetMinutes;
     if ("shortageAlertHoursBefore" in input) updates.shortageAlertHoursBefore = input.shortageAlertHoursBefore ?? null;
 
     const event = await this.prisma.client.event.update({
@@ -336,7 +341,12 @@ export class EventsService {
     });
 
     // Reschedule pending message jobs if time or alert offset changed.
-    if (input.startAt !== undefined || input.endAt !== undefined || "shortageAlertHoursBefore" in input) {
+    if (
+      input.startAt !== undefined ||
+      input.endAt !== undefined ||
+      input.assignmentLockOffsetMinutes !== undefined ||
+      "shortageAlertHoursBefore" in input
+    ) {
       await this.messageJobs.rescheduleEventMessages({
         id: event.id,
         channelId: event.channelId,
@@ -344,6 +354,7 @@ export class EventsService {
         endAt: event.endAt,
         createdByDiscordId: existing.createdByDiscordId,
         shortageAlertHoursBefore: event.shortageAlertHoursBefore,
+        assignmentLockOffsetMinutes: event.assignmentLockOffsetMinutes,
       });
     }
 

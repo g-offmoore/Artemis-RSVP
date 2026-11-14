@@ -290,7 +290,7 @@ model Event {
   assignmentNotifiedAt        DateTime?
   lockedAt                    DateTime?
   // Assignment lock: T-{N} minutes before startAt, converted to confirmed
-  assignmentLockOffsetMinutes Int                  @default(120)
+  assignmentLockOffsetMinutes Int                  @default(60)
   assignmentLockedAt          DateTime?
   // Backup DM policy
   backupPullMode              BackupPullMode       @default(CONSENT_REQUIRED)

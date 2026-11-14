@@ -161,6 +161,7 @@ export type EventDetail = EventSummary & {
   description?: string;
   seriesId?: string | null;
   assignmentLockedAt?: string;
+  assignmentLockOffsetMinutes?: number;
   shortageAlertHoursBefore?: number | null;
   eventType?: EventTypeConfig;
   eligibilityRules?: EligibilityRule[];

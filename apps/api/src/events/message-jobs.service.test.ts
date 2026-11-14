@@ -28,6 +28,27 @@ const event = {
 };
 
 describe("MessageJobsService.scheduleEventMessages", () => {
+  it.each([
+    [undefined, "2026-08-01T17:00:00.000Z"],
+    [30, "2026-08-01T17:30:00.000Z"],
+    [120, "2026-08-01T16:00:00.000Z"],
+    [0, "2026-08-01T18:00:00.000Z"],
+  ])("uses offset %s consistently when scheduling and rescheduling", async (offset, expected) => {
+    const { prisma, upsertCalls } = makePrismaStub();
+    const service = new MessageJobsService(prisma as never);
+    const configured = { ...event, assignmentLockOffsetMinutes: offset };
+    await service.scheduleEventMessages(configured);
+    expect(upsertCalls.find((c) => c.create.messageType === "ASSIGNMENT_LOCK")!.create.scheduledFor)
+      .toEqual(new Date(expected));
+
+    await service.rescheduleEventMessages({ ...configured, startAt: new Date("2026-08-02T18:00:00Z") });
+    const lock = prisma.client.eventMessageJob.updateMany.mock.calls.find(
+      ([args]) => args.where.messageType === "ASSIGNMENT_LOCK",
+    )![0];
+    expect(lock.where.status).toBe("PENDING");
+    expect(lock.data.scheduledFor).toEqual(new Date(expected.replace("08-01", "08-02")));
+  });
+
   it("schedules all six job types, including the T-24h PREFLIGHT DM", async () => {
     const { prisma, upsertCalls } = makePrismaStub();
     const service = new MessageJobsService(prisma as never);

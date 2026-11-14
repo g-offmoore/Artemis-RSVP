@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { computeAssignmentLockScheduledFor } from "@artemis/domain";
 import {
   artemisApi,
   EventDetail,
@@ -155,6 +156,21 @@ export default async function EventPage({
                   : a.status === "PROJECTED_SEATED" || a.status === "ASSIGNED",
               ).length
             }
+          </strong>
+        </div>
+        <div className="stat">
+          <span className="muted">Assignment lock (scheduled)</span>
+          <strong style={{ fontSize: "0.85rem" }}>
+            {new Intl.DateTimeFormat("en-US", {
+              timeZone: eventTimeZone,
+              dateStyle: "short",
+              timeStyle: "short",
+            }).format(
+              computeAssignmentLockScheduledFor(
+                new Date(event.startAt),
+                event.assignmentLockOffsetMinutes,
+              ),
+            )}
           </strong>
         </div>
         {event.assignmentLockedAt && (

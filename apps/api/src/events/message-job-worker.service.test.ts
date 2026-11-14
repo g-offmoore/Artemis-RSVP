@@ -25,6 +25,30 @@ function makeService(event: Record<string, unknown>) {
 describe("MessageJobWorkerService PREFLIGHT dispatch", () => {
   const fetchMock = vi.fn();
 
+  it.each(["PREFLIGHT", "REMINDER"])("%s displays the stored legacy lock time privately", async (messageType) => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ id: "dm-channel" }) })
+      .mockResolvedValueOnce({ ok: true, text: async () => "{}" });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = makeService({
+      id: "evt-1", title: "Event", startAt: new Date("2027-08-01T18:00:00Z"),
+      assignmentLockOffsetMinutes: 120, tables: [], participants: [], rsvps: [],
+    });
+    await (service as any).dispatchJob({ id: "job", eventId: "evt-1", targetId: "organizer", messageType }, "fake-token");
+    const content = JSON.parse(fetchMock.mock.calls[1][1].body).content;
+    expect(content).toContain(`<t:${new Date("2027-08-01T16:00:00Z").getTime() / 1000}:R>`);
+    expect(content).not.toContain("T-1h");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).recipient_id).toBe("organizer");
+  });
+
+  it("does not record a false one-hour reason for automatic locks", async () => {
+    const lockAssignments = vi.fn().mockRejectedValue(new Error("already locked"));
+    const service = new MessageJobWorkerService({} as never, {} as never, {} as never,
+      { lockAssignments } as never, {} as never, {} as never);
+    await (service as any).dispatchJob({ id: "job", eventId: "evt-1", messageType: "ASSIGNMENT_LOCK" }, "fake-token");
+    expect(lockAssignments.mock.calls[0][1].reason).not.toContain("T-1h");
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     fetchMock.mockReset();

@@ -25,6 +25,7 @@ type EventForMessageJobs = {
   channelId: string;
   startAt: Date;
   endAt: Date;
+  assignmentLockOffsetMinutes?: number;
   // createdByDiscordId targets the REMINDER DM to the event organizer (rules.md §12.4).
   createdByDiscordId: string;
   // When set, the PREFLIGHT alert fires this many hours before startAt instead of 24h.
@@ -39,7 +40,7 @@ export class MessageJobsService {
 
   // Called on event creation. Creates pending pre-event, post-event, T-24h
   // preflight (DM to creator), T-4h organizer reminder (DM to creator), T-3h
-  // backup DM ask, and T-1h assignment lock jobs. Uses upsert so calling twice
+  // backup DM ask, and event-policy assignment lock jobs. Uses upsert so calling twice
   // is idempotent.
   //
   // PREFLIGHT and REMINDER target the event creator via DM (not the public
@@ -47,7 +48,7 @@ export class MessageJobsService {
   // publicly.
   //
   // ASSIGNMENT_LOCK is a P0 requirement per rules.md §11.1: assignment must
-  // run and lock exactly 1 hour before event start.
+  // run and lock at the event's configured time (one hour by default).
   // TODO(product-feedback): Preflight timing is configurable, and series signup
   // windows are copied into occurrences. Remaining notification policy work is
   // configurable destinations, role mentions, durable user DMs, final assignment
@@ -58,7 +59,7 @@ export class MessageJobsService {
     const preflightScheduledFor = computePreflightScheduledFor(event.startAt, event.shortageAlertHoursBefore);
     const reminderScheduledFor = computeReminderScheduledFor(event.startAt);
     const backupDmAskScheduledFor = computeBackupDmAskScheduledFor(event.startAt);
-    const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt);
+    const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt, event.assignmentLockOffsetMinutes);
 
     const upsertJob = (
       messageType: MessageType,
@@ -79,7 +80,7 @@ export class MessageJobsService {
       upsertJob("PREFLIGHT",       "USER",    event.createdByDiscordId,    preflightScheduledFor),
       upsertJob("REMINDER",        "USER",    event.createdByDiscordId,    reminderScheduledFor),
       upsertJob("CUSTOM",          "CHANNEL", event.channelId,             backupDmAskScheduledFor),
-      // ASSIGNMENT_LOCK triggers lockAssignments() at T-1h (P0).
+      // ASSIGNMENT_LOCK triggers lockAssignments() at the effective event lock time.
       upsertJob("ASSIGNMENT_LOCK", "CHANNEL", event.channelId,             assignmentLockScheduledFor),
     ]);
 
@@ -102,7 +103,7 @@ export class MessageJobsService {
     const preflightScheduledFor = computePreflightScheduledFor(event.startAt, event.shortageAlertHoursBefore);
     const reminderScheduledFor = computeReminderScheduledFor(event.startAt);
     const backupDmAskScheduledFor = computeBackupDmAskScheduledFor(event.startAt);
-    const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt);
+    const assignmentLockScheduledFor = computeAssignmentLockScheduledFor(event.startAt, event.assignmentLockOffsetMinutes);
 
     const updatePending = (messageType: MessageType, scheduledFor: Date) =>
       this.prisma.client.eventMessageJob.updateMany({

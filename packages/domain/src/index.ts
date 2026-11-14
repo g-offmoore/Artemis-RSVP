@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES,
+  isAssignmentLockOffsetMinutes,
+} from "./assignment-lock-time.js";
+export {
+  DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES,
+  computeAssignmentLockScheduledFor,
+} from "./assignment-lock-time.js";
 
 const emptyStringToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
@@ -141,6 +149,11 @@ export const eventTypeUpdateSchema = z.object({
 });
 export type EventTypeUpdateInput = z.infer<typeof eventTypeUpdateSchema>;
 
+// Non-negative whole minutes, bounded by PostgreSQL's Int column. No coercion.
+export const assignmentLockOffsetMinutesSchema = z
+  .number()
+  .refine(isAssignmentLockOffsetMinutes, "Invalid assignment lock offset minutes");
+
 export const eventCreateSchema = z.object({
   guildId: z.string().min(1),
   channelId: z.string().min(1),
@@ -153,6 +166,9 @@ export const eventCreateSchema = z.object({
   endAt: eventDateSchema,
   signupOpensAt: eventDateSchema.optional(),
   signupClosesAt: eventDateSchema.optional(),
+  assignmentLockOffsetMinutes: assignmentLockOffsetMinutesSchema.default(
+    DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES,
+  ),
   shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
   createdByDiscordId: z.string().min(1),
   seriesId: z.string().optional(),
@@ -329,6 +345,7 @@ export const eventUpdateSchema = z.object({
   gameSystem: z.string().trim().min(1).optional(),
   startAt: eventDateSchema.optional(),
   endAt: eventDateSchema.optional(),
+  assignmentLockOffsetMinutes: assignmentLockOffsetMinutesSchema.optional(),
   shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
   actorDiscordId: z.string().min(1),
   applyToFuture: z.boolean().optional(),
@@ -1002,8 +1019,8 @@ export const MESSAGE_JOB_DEFAULTS = {
   preflightOffsetMs: 24 * 60 * 60 * 1000,     // 24 hours before startAt
   reminderOffsetMs: 4 * 60 * 60 * 1000,       // 4 hours before startAt — organizer warning
   backupDmAskOffsetMs: 3 * 60 * 60 * 1000,   // 3 hours before startAt — backup DM consent ask
-  // P0: assignment must lock exactly 1 hour before event start (rules.md §11.1).
-  assignmentLockOffsetMs: 60 * 60 * 1000,     // 1 hour before startAt
+  // One hour is the default, not an override of stored event policy (§11.1).
+  assignmentLockOffsetMs: DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES * 60 * 1000,
 } as const;
 
 export function computePreEventScheduledFor(startAt: Date): Date {
@@ -1032,11 +1049,6 @@ export function computeReminderScheduledFor(startAt: Date): Date {
 // T-3h: checks for DM shortages and sends backup DM consent asks if needed.
 export function computeBackupDmAskScheduledFor(startAt: Date): Date {
   return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.backupDmAskOffsetMs);
-}
-
-// T-1h: final assignment lock — this is a P0 requirement (rules.md §11.1).
-export function computeAssignmentLockScheduledFor(startAt: Date): Date {
-  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.assignmentLockOffsetMs);
 }
 
 // ─── Backup DM Discord button helpers ────────────────────────────────────
