@@ -116,6 +116,41 @@ export function guildAccessMessage(guildSettings: { staffRoleIds?: string[]; adm
   return "Dashboard and ambassador tools require one of this guild's configured staff/admin Discord roles.";
 }
 
+export type DashboardGuildCandidate = {
+  guildId: string;
+  /** Display name: the user's Discord view of the guild, else the stored name, else the ID. */
+  name: string;
+  /** False for a platform admin viewing a guild they are not a Discord member of. */
+  isMember: boolean;
+};
+
+/**
+ * Which Artemis-managed guilds a user logging in should be checked against: guilds they
+ * are a Discord member of, or every managed guild for a platform admin.
+ *
+ * `managedGuilds` is the `/api/v1/guilds` response, which is `{ guildId, name }[]`. The
+ * OAuth callback once treated it as `string[]`, so no guild ever matched the user's
+ * Discord memberships and every login got a 403 (2026-11-14).
+ */
+export function dashboardGuildCandidates(
+  managedGuilds: { guildId: string; name: string | null }[],
+  memberOf: { id: string; name: string }[],
+  platformAdmin: boolean,
+): DashboardGuildCandidate[] {
+  const memberOfById = new Map(memberOf.map((guild) => [guild.id, guild]));
+  return managedGuilds.flatMap((guild) => {
+    const discordGuild = memberOfById.get(guild.guildId);
+    if (!discordGuild && !platformAdmin) return [];
+    return [
+      {
+        guildId: guild.guildId,
+        name: discordGuild?.name ?? guild.name ?? guild.guildId,
+        isMember: Boolean(discordGuild),
+      },
+    ];
+  });
+}
+
 export function configuredPlatformAdminIds() {
   return (process.env.PLATFORM_ADMIN_DISCORD_USER_IDS ?? "")
     .split(",")
