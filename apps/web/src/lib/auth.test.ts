@@ -3,6 +3,7 @@ import {
   activeGuild,
   activeGuildRoles,
   configuredPlatformAdminIds,
+  dashboardGuildCandidates,
   DashboardSession,
   guildAccessMessage,
   hasAllowedRoleForGuild,
@@ -121,5 +122,44 @@ describe("isDashboardSession", () => {
 
   it("rejects a session where guilds isn't an array", () => {
     expect(isDashboardSession({ ...makeSession(), guilds: "g1" })).toBe(false);
+  });
+});
+
+describe("dashboardGuildCandidates", () => {
+  // Shape of the real /api/v1/guilds response (GuildSettingsService.listManagedGuilds).
+  const managed = [
+    { guildId: "g1", name: "Stored One" },
+    { guildId: "g2", name: null },
+    { guildId: "g3", name: "Stored Three" },
+  ];
+  const memberOf = [
+    { id: "g1", name: "Discord One" },
+    { id: "g2", name: "Discord Two" },
+    { id: "other", name: "Unmanaged" },
+  ];
+
+  it("matches managed guild objects against the user's Discord memberships", () => {
+    expect(dashboardGuildCandidates(managed, memberOf, false)).toEqual([
+      { guildId: "g1", name: "Discord One", isMember: true },
+      { guildId: "g2", name: "Discord Two", isMember: true },
+    ]);
+  });
+
+  it("returns nothing for a non-admin in no managed guild", () => {
+    expect(dashboardGuildCandidates(managed, [{ id: "other", name: "x" }], false)).toEqual([]);
+  });
+
+  it("gives a platform admin every managed guild, naming non-member guilds from storage", () => {
+    expect(dashboardGuildCandidates(managed, memberOf, true)).toEqual([
+      { guildId: "g1", name: "Discord One", isMember: true },
+      { guildId: "g2", name: "Discord Two", isMember: true },
+      { guildId: "g3", name: "Stored Three", isMember: false },
+    ]);
+  });
+
+  it("falls back to the guild ID when no name is known", () => {
+    expect(dashboardGuildCandidates([{ guildId: "g9", name: null }], [], true)).toEqual([
+      { guildId: "g9", name: "g9", isMember: false },
+    ]);
   });
 });

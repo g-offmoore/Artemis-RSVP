@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { artemisApi } from "../../../../src/lib/artemis-api";
+import { artemisApi, GuildSummary } from "../../../../src/lib/artemis-api";
 import {
+  dashboardGuildCandidates,
   GuildMembership,
   hasAllowedRoleForGuild,
   isPlatformAdmin,
@@ -25,28 +26,20 @@ export async function GET(request: NextRequest) {
   const user = await discordGet<{ id: string; username: string; avatar?: string }>("/users/@me", token.access_token);
   const memberOf = await discordGet<Array<{ id: string; name: string }>>("/users/@me/guilds", token.access_token);
 
-  const managedGuildIds = await artemisApi<string[]>("/api/v1/guilds").catch(() => [] as string[]);
+  const managedGuilds = await artemisApi<GuildSummary[]>("/api/v1/guilds").catch(() => [] as GuildSummary[]);
   const platformAdmin = isPlatformAdmin(user.id);
 
-  const memberOfById = new Map(memberOf.map((guild) => [guild.id, guild]));
-  const candidateGuildIds = platformAdmin
-    ? managedGuildIds
-    : managedGuildIds.filter((id) => memberOfById.has(id));
-
   const guilds: GuildMembership[] = [];
-  for (const guildId of candidateGuildIds) {
-    const discordGuild = memberOfById.get(guildId);
+  for (const { guildId, name, isMember } of dashboardGuildCandidates(managedGuilds, memberOf, platformAdmin)) {
     const settings = await artemisApi<{ staffRoleIds?: string[]; adminRoleIds?: string[] }>(
       `/api/v1/guild-settings?guildId=${guildId}`,
       { guildId },
     ).catch(() => null);
 
-    if (!discordGuild) {
+    if (!isMember) {
       // Platform admin viewing a store they aren't a Discord member of: no roles to
       // check, admin status alone grants access.
-      if (platformAdmin) {
-        guilds.push({ guildId, name: guildId, roles: [] });
-      }
+      guilds.push({ guildId, name, roles: [] });
       continue;
     }
 
@@ -55,7 +48,7 @@ export async function GET(request: NextRequest) {
     );
 
     if (platformAdmin || hasAllowedRoleForGuild(member.roles, settings ?? {})) {
-      guilds.push({ guildId, name: discordGuild.name, roles: member.roles });
+      guilds.push({ guildId, name, roles: member.roles });
     }
   }
 
