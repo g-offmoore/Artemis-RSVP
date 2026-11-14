@@ -265,10 +265,12 @@ Expected manual follow-up:
 ## Logs And Disk Cleanup
 
 - Docker uses the `local` log driver with bounded log files.
-- Weekly cleanup uses `scripts/cleanup-docker.sh`.
+- Scheduled jobs live in `deploy/cron/artemis.crontab` and run as the `deploy` user. Install or update with `mkdir -p ~/logs && crontab /opt/artemis/repo/deploy/cron/artemis.crontab`; logs go to `~/logs/`.
+- Weekly cleanup (Sunday 04:30 UTC) uses `scripts/cleanup-docker.sh`: unused images and build cache older than 7 days. It also removes rollback-tagged images once they are unused and over 7 days old.
 - Never automate `docker system prune --volumes`.
-- Run `scripts/host-health.sh` from cron or systemd timer.
+- `scripts/host-health.sh` runs every 15 minutes. It checks disk, memory pressure, unhealthy or stopped Artemis containers, and failed systemd units. It reads only `DISCORD_OPS_WEBHOOK_URL` from the env file, and posts there only when the set of problems changes (including "all clear") or once a day while a problem persists. State lives in `~/.local/state/artemis/host-health.state`.
 - Disk thresholds: 70% warning, 85% critical, 90% urgent.
+- Memory thresholds: swap above 1024 MB, or less than 96 MB available. A few hundred MB of swap holding idle pages is normal on the 1 GB Nanode.
 
 ## Known Tradeoffs
 

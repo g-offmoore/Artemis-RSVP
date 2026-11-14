@@ -1,0 +1,19 @@
+# Crontab for the `deploy` user on the Artemis Nanode.
+# Install:  mkdir -p ~/logs && crontab /opt/artemis/repo/deploy/cron/artemis.crontab
+# Check:    crontab -l ; tail ~/logs/host-health.log
+# Times are UTC (server timezone).
+#
+# m   h  dom mon dow  command
+
+# Host health every 15 minutes. Posts to DISCORD_OPS_WEBHOOK_URL only when the set of
+# problems changes, or once a day while a problem persists.
+*/15  *  *   *   *    flock -n /tmp/artemis-host-health.lock bash /opt/artemis/repo/scripts/host-health.sh >> "$HOME/logs/host-health.log" 2>&1
+
+# Weekly Docker cleanup, Sunday 04:30 UTC: unused images and build cache older than 7 days.
+# Never prunes volumes.
+30    4  *   *   0    flock -n /tmp/artemis-cleanup.lock bash /opt/artemis/repo/scripts/cleanup-docker.sh >> "$HOME/logs/cleanup-docker.log" 2>&1
+
+# Daily encrypted logical backup, 05:15 UTC. Not enabled yet: needs the OBJECT_STORAGE_*
+# and BACKUP_ENCRYPTION_PASSPHRASE values in /etc/artemis/production.env, pg_dump/gpg/aws
+# on the host, and those env values passed to the script (it does not read the env file).
+# 15  5  *   *   *    flock -n /tmp/artemis-backup.lock bash /opt/artemis/repo/scripts/backup-postgres.sh >> "$HOME/logs/backup-postgres.log" 2>&1
