@@ -95,6 +95,7 @@ describe("bot eventEmbed (characterization)", () => {
       { name: "Capacity", value: "2/13 seats\n2 tables", inline: true },
       { name: "Status", value: "SCHEDULED", inline: true },
       { name: "Event ID", value: "evt1", inline: true },
+      { name: "Assignment lock", value: "Scheduled: <t:1796079600:F>" },
     ]);
   });
 

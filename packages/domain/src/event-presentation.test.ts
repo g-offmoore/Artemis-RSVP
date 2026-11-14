@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
 import {
   buildEventButtonRows,
   buildEventEmbed,
@@ -128,6 +130,21 @@ describe("buildEventButtonRows", () => {
 });
 
 describe("buildEventEmbed", () => {
+  it("keeps the browser subpath dependency-free and outside the index cycle", () => {
+    const visited = new Set<string>();
+    const visit = (url: URL) => {
+      expect(url.pathname).not.toMatch(/\/index\.ts$/);
+      expect(visited.has(url.href)).toBe(false);
+      visited.add(url.href);
+      const source = readFileSync(url, "utf8");
+      for (const entry of ts.preProcessFile(source).importedFiles) {
+        expect(entry.fileName).toMatch(/^\.\//);
+        visit(new URL(entry.fileName.replace(/\.js$/, ".ts"), url));
+      }
+    };
+    visit(new URL("./event-presentation.ts", import.meta.url));
+    expect(visited.size).toBe(2);
+  });
   it("renders counts excluding ineligible participants and inactive tables", () => {
     expect(buildEventEmbed(baseEvent)).toEqual({
       title: "Game Night",
@@ -145,6 +162,7 @@ describe("buildEventEmbed", () => {
         { name: "Capacity", value: "2/13 seats\n2 tables", inline: true },
         { name: "Status", value: "SCHEDULED", inline: true },
         { name: "Event ID", value: "evt1", inline: true },
+        { name: "Assignment lock", value: "Scheduled: <t:1796079600:F>" },
       ],
     });
   });

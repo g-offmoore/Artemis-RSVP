@@ -4,6 +4,8 @@
 // onto their own runtime. Custom IDs are the legacy IDs routed by the bot
 // interaction handler and must not change here.
 
+import { computeAssignmentLockScheduledFor } from "./assignment-lock-time.js";
+
 export type EventVocabulary = {
   usesDndCategories: boolean;
   attendeePlural: string;
@@ -73,6 +75,7 @@ export type EventPresentationInput = {
   status?: string | null;
   startAt: Date | string;
   endAt: Date | string;
+  assignmentLockOffsetMinutes?: number;
   eventType?: { allowsGuests?: boolean } | null;
   tables?: Array<{
     status: string;
@@ -157,6 +160,17 @@ export function buildEventEmbed(
       },
       { name: "Status", value: event.status ?? "SCHEDULED", inline: true },
       { name: "Event ID", value: event.id, inline: true },
+      {
+        name: "Assignment lock",
+        // Explicitly scheduled, not a claim about when an actual lock occurred.
+        value: `Scheduled: ${formatDiscordTimestamp(
+          computeAssignmentLockScheduledFor(
+            new Date(event.startAt),
+            event.assignmentLockOffsetMinutes,
+          ),
+          "F",
+        )}`,
+      },
     ],
   };
   if (event.imageUrl) embed.image = { url: event.imageUrl };
