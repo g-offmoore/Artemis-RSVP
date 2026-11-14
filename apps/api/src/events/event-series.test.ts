@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { eventSeriesCreateSchema, makeDateInTimezone, WEEKDAY_TO_JS } from "@artemis/domain";
 
@@ -131,10 +131,6 @@ describe("EventSeriesService.generate integration (mocked)", () => {
     const { EventSeriesService } = await import("./event-series.service.js");
 
     const createdEvents: { startAt: string }[] = [];
-    const eventsCreate = vi.fn().mockImplementation((args: { data: { startAt: string } }) => {
-      createdEvents.push({ startAt: args.data.startAt });
-      return { id: "ev1", startAt: new Date(args.data.startAt), title: "t" };
-    });
 
     const prisma = makePrismaMock();
     // Override guildSettings to return a specific TZ

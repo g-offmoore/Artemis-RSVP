@@ -78,7 +78,7 @@ describe("canParticipantUseTable — strict track equality", () => {
         makeParticipant({ id: "p", category: "HEROIC" }),
         makeTable({ id: "t", tableType: "HEROIC" }),
       ),
-    ).toBe(false === false); // true
+    ).toBe(true);
   });
 
   it("allows MIXED player at MIXED table", () => {

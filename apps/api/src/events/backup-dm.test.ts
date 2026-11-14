@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 
 // ─── EventsService.handleBackupDmAction ──────────────────────────────────────
 // Tests the accept/decline/release state-machine logic.
@@ -91,7 +91,7 @@ describe("EventsService backup DM state transitions", () => {
 
   it("release action sets status to BACKUP_RELEASED_AS_PLAYER", async () => {
     const { EventsService } = await import("./events.service.js");
-    const { prisma, updatedParticipants } = makeDeps();
+    const { prisma } = makeDeps();
 
     const svc = new EventsService(
       prisma as any,
