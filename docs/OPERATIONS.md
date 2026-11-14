@@ -44,13 +44,15 @@ Optional URLs such as `DISCORD_OPS_WEBHOOK_URL` may be blank; the API and bot no
 
 ## Nanode Deployment Sequence
 
-Use `scripts/deploy-nanode.sh` on the host. It runs from `/opt/artemis/repo` against `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
+Use `scripts/deploy-nanode.sh` on the host (installed as `~/deploy-artemis.sh` for the `deploy` user; re-copy it after the script changes). It runs from `/opt/artemis/repo` against `/etc/artemis/production.env`. Do not run blue/green or duplicate full-stack deployments on the Nanode.
+
+Images are built in CI, not on the host. After `verify` passes on `master`, the `publish-images` job in `.github/workflows/ci.yml` pushes `ghcr.io/g-offmoore/artemis-rsvp/{api,web,bot}` tagged `sha-<full commit sha>` and `latest`. The deploy script pulls the tag that matches the commit it just checked out. It exports `ARTEMIS_IMAGE_PREFIX` and `ARTEMIS_IMAGE_TAG`, which override the env file's values. The images contain no environment-specific config or secrets; everything comes from the env file at runtime. Set `ARTEMIS_DEPLOY_MODE=build` to fall back to building on the host if GHCR or CI is unavailable. That build is slow, and the Next.js build is memory-hungry on the 1 GB host.
 
 1. Show current container status.
 2. Refuse to proceed if the Git working tree is dirty.
 3. Pull with `git pull --ff-only`.
 4. Render Compose config and fail if any `${...}` variable is unresolved.
-5. Build images with the `migrate` profile (this also builds api/web/bot, since they have no `profiles:` restriction).
+5. Pull the CI-built images for this commit (`sha-<commit>`). If CI hasn't finished publishing them yet, it retries every 30s for up to 20 minutes (`ARTEMIS_IMAGE_WAIT_SECONDS`). In `ARTEMIS_DEPLOY_MODE=build`, it builds them on the host with the `migrate` profile instead.
 6. Run the migration one-shot.
 7. Restart API with `--force-recreate`; wait up to 180s for Docker's own health status to report `healthy` (polling every 3s), and fail and dump logs on `unhealthy`, a stopped container, or timeout. A single check after a fixed sleep is not enough: the API takes ~10s to pass `/readyz`.
 8. Restart web with `--force-recreate`; same health-status gate.
@@ -59,24 +61,41 @@ Use `scripts/deploy-nanode.sh` on the host. It runs from `/opt/artemis/repo` aga
 11. Show final service status, `docker stats`, memory, and disk usage.
 12. Reminder to run `/ops check` in Discord.
 
-Every restart step uses `--force-recreate`, not a bare `up -d`. A bare `up -d` only recreates a container if Compose's own heuristic detects a config/image change — on 2026-07-30 this silently left `web`/`bot`/`caddy` running two-month-old images after what looked like a successful deploy, because the health checks that followed couldn't tell a freshly-recreated container apart from one that was never touched. `--force-recreate` removes that ambiguity entirely.
+Every restart step uses `--no-build --force-recreate`, not a bare `up -d`. A bare `up -d` only recreates a container if Compose's own heuristic detects a config/image change — on 2026-07-30 this silently left `web`/`bot`/`caddy` running two-month-old images after what looked like a successful deploy, because the health checks that followed couldn't tell a freshly-recreated container apart from one that was never touched. `--force-recreate` removes that ambiguity entirely.
 
 Equivalent manual commands:
 
 ```bash
 cd /opt/artemis/repo
 DC="docker compose --env-file /etc/artemis/production.env"
+export ARTEMIS_IMAGE_PREFIX=ghcr.io/g-offmoore/artemis-rsvp
+export ARTEMIS_IMAGE_TAG="sha-$(git rev-parse HEAD)"
 $DC config | grep '${' && echo "unresolved vars, stop" # should print nothing
-$DC --profile migrate build
+$DC pull api web bot caddy
 $DC --profile migrate run --rm migrate
-$DC up -d --force-recreate api
-docker inspect --format '{{.State.Health.Status}}' "$($DC ps -q api)"
-$DC up -d --force-recreate web
+$DC up -d --no-build --force-recreate api
+docker inspect --format '{{.State.Health.Status}}' "$($DC ps -q api)"   # repeat until healthy
+$DC up -d --no-build --force-recreate web
 docker inspect --format '{{.State.Health.Status}}' "$($DC ps -q web)"
-$DC up -d --force-recreate caddy
-$DC up -d --force-recreate bot
+$DC up -d --no-build --force-recreate caddy
+$DC up -d --no-build --force-recreate bot
 $DC ps
 ```
+
+### Rolling Back
+
+Every `master` commit that passed CI has images in GHCR, so rolling back the app means recreating the containers on an older tag. Find the commit with `git log --oneline` or in the GHCR package's version list.
+
+```bash
+cd /opt/artemis/repo
+DC="docker compose --env-file /etc/artemis/production.env"
+export ARTEMIS_IMAGE_PREFIX=ghcr.io/g-offmoore/artemis-rsvp
+export ARTEMIS_IMAGE_TAG=sha-<previous full commit sha>
+$DC pull api web bot
+$DC up -d --no-build --force-recreate api web bot
+```
+
+This doesn't undo database migrations. That's safe while migrations stay additive (new columns or tables), because older code ignores them. Caddy keeps the Caddyfile from the current checkout. The next normal deploy moves everything back to the head of `master`.
 
 To confirm a service actually got a new container (not just "healthy," which a stale container also reports), compare `docker compose ps` output before and after — the `CREATED` column should read "seconds ago," not weeks.
 
