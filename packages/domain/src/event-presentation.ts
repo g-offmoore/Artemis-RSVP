@@ -1,8 +1,8 @@
 // Framework-neutral presentation contracts for the public Discord event post
 // and the organizer web UI. No discord.js / Discord REST / Node dependency:
 // adapters (bot builders, API REST payloads, web labels) map these descriptors
-// onto their own runtime. Custom IDs are the legacy IDs routed by the bot
-// interaction handler and must not change here.
+// onto their own runtime. Public controls use the P01b IDs; the bot also keeps
+// routing legacy IDs for posts already published before this slice.
 
 export type EventVocabulary = {
   usesDndCategories: boolean;
@@ -71,6 +71,7 @@ export type EventPresentationInput = {
   imageUrl?: string | null;
   gameSystem?: string | null;
   status?: string | null;
+  assignmentLockedAt?: Date | string | null;
   startAt: Date | string;
   endAt: Date | string;
   eventType?: { allowsGuests?: boolean } | null;
@@ -163,59 +164,41 @@ export function buildEventEmbed(
   return embed;
 }
 
-// Two rows. Cancelled events return no rows so stale buttons are not
-// clickable. Custom IDs are the legacy `<action>:<eventId>[:<category>]`
-// format handled by the bot; do not rename them.
+// Public post controls: Join, Run a table, My signup. Everything else
+// (category choice, guests, preferences, backup availability, cancel) lives in
+// the ephemeral personal panel opened by these buttons. Terminal events return
+// no rows so stale buttons are not clickable; closed/locked events keep only
+// My signup. Legacy `rsvp:`/`guest:`/`host:`/`assignment:`/`backup_dm:`/
+// `cancel_rsvp:`/`prefs:` IDs on already-posted messages keep routing in the
+// bot (see apps/bot/src/custom-ids.ts) but are no longer generated here.
+const NO_CONTROL_STATUSES = ["CANCELLED", "COMPLETED", "ARCHIVED", "DRAFT"];
+const VIEW_ONLY_STATUSES = ["LOCKED", "SIGNUP_CLOSED", "IN_PROGRESS"];
+
 export function buildEventButtonRows(
   event: Pick<
     EventPresentationInput,
-    "id" | "gameSystem" | "status" | "eventType"
+    "id" | "status" | "assignmentLockedAt" | "gameSystem" | "eventType"
   >,
 ): EventButtonDescriptor[][] {
-  if (event.status === "CANCELLED") return [];
+  if (event.status && NO_CONTROL_STATUSES.includes(event.status)) return [];
 
-  const vocabulary = resolveEventVocabulary(event.gameSystem);
-  const row1: EventButtonDescriptor[] = vocabulary.usesDndCategories
-    ? [
-        {
-          customId: `rsvp:${event.id}:NORMAL`,
-          label: "RSVP Normal",
-          style: 3,
-        },
-        {
-          customId: `rsvp:${event.id}:HEROIC`,
-          label: "RSVP Heroic",
-          style: 1,
-        },
-      ]
-    : [{ customId: `rsvp:${event.id}:MIXED`, label: "RSVP", style: 3 }];
-
-  if (event.eventType?.allowsGuests !== false) {
-    row1.push({ customId: `guest:${event.id}`, label: "Guests", style: 2 });
+  const mySignup: EventButtonDescriptor = {
+    customId: `my_signup:${event.id}`,
+    label: "My signup",
+    style: 2,
+  };
+  if (
+    event.assignmentLockedAt ||
+    (event.status && VIEW_ONLY_STATUSES.includes(event.status))
+  ) {
+    return [[mySignup]];
   }
 
-  row1.push(
-    {
-      customId: `host:${event.id}`,
-      label: vocabulary.hostButtonLabel,
-      style: 2,
-    },
-    {
-      customId: `assignment:${event.id}`,
-      label: "My Assignment",
-      style: 2,
-    },
-  );
-
-  const row2: EventButtonDescriptor[] = [
-    {
-      customId: `backup_dm:${event.id}`,
-      label: "Backup DM Signup",
-      style: 1,
-    },
-    { customId: `cancel_rsvp:${event.id}`, label: "Cancel RSVP", style: 4 },
-    { customId: `prefs:${event.id}`, label: "Preferences", style: 2 },
+  return [
+    [
+      { customId: `join:${event.id}`, label: "Join", style: 3 },
+      { customId: `run_table:${event.id}`, label: "Run a table", style: 1 },
+      mySignup,
+    ],
   ];
-
-  return [row1, row2];
 }

@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  ButtonInteraction,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -26,6 +27,11 @@ import {
 import pino from "pino";
 import { ArtemisApi, ArtemisApiError, withGuildContext } from "./api.js";
 import { loadConfig } from "./config.js";
+import {
+  parseButtonCustomId,
+  STALE_BUTTON_MESSAGE,
+  type ButtonRoute,
+} from "./custom-ids.js";
 import { runDiscordOpsCheck } from "./discord-ops.js";
 import {
   eventButtons,
@@ -33,6 +39,16 @@ import {
   eventVocabulary,
   formatDiscordTimestamp,
 } from "./event-post.js";
+import { extractMemberRoleIds, userFacingError } from "./interaction-utils.js";
+import {
+  handleJoin,
+  handleMySignup,
+  handlePanelAction,
+  handleRunTable,
+  type PanelDeps,
+  type PanelInteraction,
+} from "./panel-handlers.js";
+import { refreshPublicPost, type PostRefreshSource } from "./public-post.js";
 
 const config = loadConfig();
 const DEFAULT_EVENT_TIME_ZONE =
@@ -490,9 +506,53 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
   }
 }
 
+// Public post controls (Join / Run a table / My signup) and the ephemeral
+// personal panel. Legacy IDs from already-posted messages keep routing to the
+// original handlers below.
+const panelDeps: PanelDeps = {
+  api,
+  refreshPublicPost: (eventId, source) => refreshCanonicalPost(eventId, source),
+};
+
 async function handleButton(interaction: Interaction & { customId: string }) {
   if (!interaction.isButton()) return;
-  const [action, eventId, category] = interaction.customId.split(":");
+  const route = parseButtonCustomId(interaction.customId);
+  if (!route) {
+    await interaction.reply({
+      content: STALE_BUTTON_MESSAGE,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const panelInteraction: PanelInteraction = interaction;
+  switch (route.kind) {
+    case "join":
+      await handleJoin(panelInteraction, route.eventId, panelDeps);
+      return;
+    case "my_signup":
+      await handleMySignup(panelInteraction, route.eventId, panelDeps);
+      return;
+    case "run_table":
+      await handleRunTable(panelInteraction, route.eventId, panelDeps);
+      return;
+    case "panel":
+      await handlePanelAction(panelInteraction, route, panelDeps);
+      return;
+    case "backup_dm_response":
+      await handleBackupDmResponse(interaction);
+      return;
+    case "legacy":
+      await handleLegacyButton(interaction, route);
+      return;
+  }
+}
+
+async function handleLegacyButton(
+  interaction: ButtonInteraction,
+  route: Extract<ButtonRoute, { kind: "legacy" }>,
+) {
+  const { action, eventId, category } = route;
 
   if (action === "rsvp") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -523,18 +583,24 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   if (action === "guest") {
     // Two-path guest flow: Discord member picker OR text name entry for non-Discord guests.
     // API enforces the real per-RSVP guest limit; UI cap is permissive.
+    // The public post id is only carried when this click came from the public
+    // post itself (not from the ephemeral My signup panel).
+    const publicPostId =
+      interaction.message.flags.has(MessageFlags.Ephemeral)
+        ? ""
+        : interaction.message.id;
     const menu = new UserSelectMenuBuilder()
-      .setCustomId(`guest-select:${eventId}:${interaction.message.id}`)
-      .setPlaceholder("Select guild members to add as guests")
+      .setCustomId(`guest-select:${eventId}:${publicPostId}`)
+      .setPlaceholder("Select your complete Discord guest list")
       .setMinValues(0)
       .setMaxValues(10);
     const nameBtn = new ButtonBuilder()
       .setCustomId(`guest_text:${eventId}`)
-      .setLabel("Add guest by name (non-Discord)")
+      .setLabel("Replace guests with names (non-Discord)")
       .setStyle(ButtonStyle.Secondary);
     await interaction.reply({
       content:
-        "Add guests: pick Discord members below, or use the button to enter names for guests who are not in this server.",
+        "Replace your entire guest list: select all Discord guests to keep, or enter the complete list by name. This replaces previous guests, not appends to them. Select nobody to clear the list.",
       components: [
         new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(menu),
         new ActionRowBuilder<ButtonBuilder>().addComponents(nameBtn),
@@ -547,12 +613,12 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   if (action === "guest_text") {
     const modal = new ModalBuilder()
       .setCustomId(`guest-name-modal:${eventId}`)
-      .setTitle("Add Guests by Name");
+      .setTitle("Replace Guest List by Name");
     modal.addComponents(
       new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("guestNames")
-          .setLabel("Guest names (one per line, up to 10)")
+          .setLabel("Complete guest list (one per line, up to 10)")
           .setStyle(TextInputStyle.Paragraph)
           .setPlaceholder("Jane Doe\nJohn Smith")
           .setRequired(true)
@@ -609,34 +675,32 @@ async function handleButton(interaction: Interaction & { customId: string }) {
   if (action === "dm" || action === "host") {
     // TODO(product-feedback): Host signup modals should be generated from
     // event/series configuration so each program can ask its own questions.
-    const event = await api.getEvent(eventId);
-    const vocabulary = eventVocabulary(event);
+    // A modal is the initial acknowledgment: do not wait on the API first.
+    // System-specific category handling and eligibility are checked on submit.
     const modal = new ModalBuilder()
       .setCustomId(`host-modal:${eventId}`)
-      .setTitle(`${vocabulary.hostSingular} Signup`);
+      .setTitle("Run a table");
     const components: ActionRowBuilder<ModalActionRowComponentBuilder>[] = [
       new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("tableTitle")
           .setLabel("Table title")
           .setStyle(TextInputStyle.Short)
-          .setPlaceholder(`${vocabulary.hostSingular}'s Table`)
+          .setPlaceholder("My Table")
           .setRequired(false),
       ),
     ];
 
-    if (vocabulary.usesDndCategories) {
-      components.push(
-        new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("tableType")
-            .setLabel("Table type")
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder("Mixed, Normal, or Heroic")
-            .setRequired(false),
-        ),
-      );
-    }
+    components.push(
+      new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("tableType")
+          .setLabel("D&D type (ignored for other systems)")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder("Mixed, Normal, or Heroic")
+          .setRequired(false),
+      ),
+    );
 
     components.push(
       new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
@@ -658,7 +722,7 @@ async function handleButton(interaction: Interaction & { customId: string }) {
       new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("description")
-          .setLabel(`${vocabulary.hostSingular} notes`)
+          .setLabel("Table notes")
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(false),
       ),
@@ -716,29 +780,17 @@ async function handleButton(interaction: Interaction & { customId: string }) {
     return;
   }
 
+  // Legacy "My Assignment" buttons on already-posted messages now open the
+  // participant-safe My signup panel. The old handler read the whole event
+  // payload and named a table for projected (unreleased) assignments.
   if (action === "assignment") {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const event = await api.getEvent(eventId);
-    const participant = event.participants?.find(
-      (item: any) => item.discordUserId === interaction.user.id,
-    );
-    const assignment = event.assignments?.find(
-      (item: any) =>
-        item.eventParticipantId === participant?.id &&
-        (item.status === "ASSIGNED" || item.status === "PROJECTED_SEATED" || item.status === "CONFIRMED_SEATED"),
-    );
-    const table = event.tables?.find(
-      (item: any) => item.id === assignment?.eventTableId,
-    );
-    await interaction.editReply({
-      content: table
-        ? `Your current table assignment is **${table.title}**. Staff may adjust assignments before the event locks.`
-        : "You do not have a table assignment yet.",
-    });
+    await handleMySignup(interaction, eventId, panelDeps);
     return;
   }
+}
 
-  // Backup DM accept / decline buttons — sent via Discord DM by the message worker.
+// Backup DM accept / decline buttons — sent via Discord DM by the message worker.
+async function handleBackupDmResponse(interaction: ButtonInteraction) {
   const parsed = parseBackupDmCustomId(interaction.customId);
   if (parsed) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -813,15 +865,11 @@ async function handleUserSelectMenu(interaction: Interaction) {
         ? `Guest list updated. ${guests.length} guest(s) recorded.`
         : "Guest list cleared.",
     });
-    if (originalMessageId) {
-      const event = await api.getEvent(eventId);
-      await (interaction.channel as any)?.messages
-        ?.fetch(originalMessageId)
-        .then((msg: any) =>
-          msg?.edit({ embeds: [eventEmbed(event)], components: eventButtons(event) }),
-        )
-        .catch(() => undefined);
-    }
+    await refreshCanonicalPost(eventId, {
+      hintedMessageId: originalMessageId || undefined,
+      channelId: interaction.channelId,
+      sourceIsEphemeral: true,
+    });
     return;
   }
 
@@ -889,7 +937,7 @@ async function handleModal(interaction: Interaction & { customId: string }) {
     }
     await api.updateGuests(eventId, interaction.user.id, guests);
     await interaction.editReply({
-      content: `${guests.length} guest(s) added: ${guests.map((g) => g.displayName).join(", ")}.`,
+      content: `Guest list replaced with ${guests.length} guest(s): ${guests.map((g) => g.displayName).join(", ")}.`,
     });
     await refreshEventMessage(interaction, eventId);
     return;
@@ -981,18 +1029,41 @@ function formatAssignmentResult(result: any) {
   return `Assignment complete. Decisions: ${result.decisions?.length ?? 0}. Warnings: ${warnings.length}.${warningText}`;
 }
 
-async function refreshEventMessage(interaction: Interaction, eventId: string) {
-  const event = await api.getEvent(eventId);
-  const message = interaction.isButton()
-    ? interaction.message
-    : interaction.isModalSubmit()
-      ? (interaction as any).message
+// Refreshes the CANONICAL public event post (see public-post.ts). Never edits
+// the clicked message blindly: from an ephemeral panel that message is the
+// participant's private panel, not the public post.
+function refreshCanonicalPost(eventId: string, source: PostRefreshSource) {
+  return refreshPublicPost(
+    {
+      getEvent: (id) => api.getEvent(id),
+      fetchMessage: async (channelId, messageId) => {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel || !channel.isTextBased()) return null;
+        return channel.messages.fetch(messageId).catch(() => null);
+      },
+      render: (event) => ({
+        embeds: [eventEmbed(event)],
+        components: eventButtons(event),
+      }),
+      warn: (message, details) => logger.warn(details ?? {}, message),
+    },
+    eventId,
+    source,
+  );
+}
+
+function refreshEventMessage(interaction: Interaction, eventId: string) {
+  const message =
+    interaction.isButton() || interaction.isModalSubmit()
+      ? ((interaction as { message?: unknown }).message ?? null)
       : null;
-  await message
-    ?.edit({ embeds: [eventEmbed(event)], components: eventButtons(event) })
-    .catch((error: unknown) => {
-      logger.warn({ error, eventId }, "Could not refresh event message");
-    });
+  const flags = (message as { flags?: { has(flag: number): boolean } } | null)
+    ?.flags;
+  return refreshCanonicalPost(eventId, {
+    channelId: interaction.channelId,
+    sourceIsEphemeral: Boolean(flags?.has(MessageFlags.Ephemeral)),
+    interactionMessage: message,
+  });
 }
 
 function formatCategory(category: string) {
@@ -1024,56 +1095,6 @@ function optionalModalValue(
 ) {
   const value = interaction.fields.getTextInputValue(customId).trim();
   return value || undefined;
-}
-
-// Extracts the member's Discord role IDs for API eligibility checks.
-// Works for both GuildMember (.roles.cache Collection) and
-// APIInteractionGuildMember (.roles string[]).
-function extractMemberRoleIds(member: unknown): string[] {
-  if (!member || typeof member !== "object") return [];
-  const roles = (member as Record<string, unknown>).roles;
-  if (!roles) return [];
-  if (Array.isArray(roles)) return roles as string[];
-  const cache = (roles as Record<string, unknown>).cache;
-  if (cache && typeof (cache as Map<string, unknown>).keys === "function") {
-    return [...(cache as Map<string, unknown>).keys()];
-  }
-  return [];
-}
-
-function userFacingError(error: unknown) {
-  if (error instanceof ArtemisApiError) {
-    if (error.status === 404 && /RSVP not found/i.test(error.responseBody)) {
-      return "RSVP first, then add guests.";
-    }
-    // 400 Bad Request, 403 Forbidden, 409 Conflict — all carry a user-readable message.
-    if (error.status === 400 || error.status === 403 || error.status === 409) {
-      return (
-        apiValidationMessage(error.responseBody) ??
-        "Artemis could not save that because part of the request was not valid."
-      );
-    }
-  }
-
-  return "Artemis could not complete that action. Staff has been notified if alerts are configured.";
-}
-
-function apiValidationMessage(responseBody: string) {
-  try {
-    const body = JSON.parse(responseBody) as {
-      message?: string;
-      issues?: Array<{ path: string; message: string }>;
-    };
-    if (Array.isArray(body.issues) && body.issues.length) {
-      return body.issues
-        .slice(0, 3)
-        .map((issue) => `${issue.path}: ${issue.message}`)
-        .join("\n");
-    }
-    return body.message;
-  } catch {
-    return undefined;
-  }
 }
 
 async function handleOpsSettings(interaction: ChatInputCommandInteraction) {

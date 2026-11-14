@@ -1,4 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  ACTOR_ASSERTION_HEADER,
+  parseActorDiscordId,
+  type MySignupView,
+} from "@artemis/domain";
 import { BotConfig } from "./config.js";
 
 /**
@@ -35,6 +40,33 @@ export class ArtemisApi {
 
   async getEvent(id: string) {
     return this.request(`/api/v1/events/${id}`);
+  }
+
+  /**
+   * Participant-safe view for the user the bot is acting for. The actor is sent
+   * ONLY as the internal assertion header (never in the URL/body) and must be
+   * derived from interaction.user.id by the caller.
+   */
+  async getMySignup(eventId: string, actorDiscordId: string): Promise<MySignupView> {
+    const actor = parseActorDiscordId(actorDiscordId);
+    if (!actor) throw new Error("A valid actor Discord user id is required");
+    return this.request(`/api/v1/events/${encodeURIComponent(eventId)}/my-signup`, {
+      headers: { [ACTOR_ASSERTION_HEADER]: actor },
+    });
+  }
+
+  async checkEligibility(
+    eventId: string,
+    payload: {
+      discordUserId: string;
+      memberDiscordRoleIds: string[];
+      signupRole: "PLAYER" | "TABLE_DM" | "BACKUP_DM" | "AMBASSADOR";
+    },
+  ): Promise<{ eligible: boolean; reason?: string }> {
+    return this.request(`/api/v1/events/${encodeURIComponent(eventId)}/eligibility/check`, {
+      method: "POST",
+      body: payload,
+    });
   }
 
   async createEvent(payload: Record<string, unknown>) {
@@ -131,7 +163,7 @@ export class ArtemisApi {
 
   private async request(
     path: string,
-    options: { method?: string; body?: unknown } = {},
+    options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
   ) {
     const currentGuildId = guildContext.getStore();
     const response = await fetch(`${this.config.API_URL}${path}`, {
@@ -142,6 +174,7 @@ export class ArtemisApi {
           ? { "x-artemis-token": this.config.INTERNAL_API_TOKEN }
           : {}),
         ...(currentGuildId ? { "x-artemis-guild-id": currentGuildId } : {}),
+        ...(options.headers ?? {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
     });

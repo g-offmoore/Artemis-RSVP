@@ -1,14 +1,17 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { ACTOR_ASSERTION_HEADER, parseActorDiscordId } from "@artemis/domain";
 import { EventGuildScopeGuard } from "../common/guild-scope.guard.js";
 import { DiscordEventPostService } from "./discord-event-post.service.js";
 import { DiscordRoleService } from "./discord-role.service.js";
@@ -38,6 +41,34 @@ export class EventsController {
   @Get(":id")
   get(@Param("id") id: string) {
     return this.events.get(id);
+  }
+
+  // Participant-safe "My signup" view for the ACTING participant.
+  //
+  // Trust model: this route is NOT public and NOT user authentication. It sits
+  // behind the global ApiTokenGuard (shared internal token) and the class-level
+  // EventGuildScopeGuard (x-artemis-guild-id must own the event). On top of
+  // that the trusted internal caller (the Discord bot) asserts WHICH user it is
+  // acting for via the x-artemis-actor-discord-id header, derived from
+  // interaction.user.id. No query parameters are accepted. Headers ARE
+  // client-editable; this header is not identity proof. Only the internal token
+  // establishes caller trust, and a token holder can assert any actor.
+  @Get(":id/my-signup")
+  mySignup(
+    @Param("id") id: string,
+    @Headers(ACTOR_ASSERTION_HEADER) actorHeader: string | undefined,
+    @Query() query: Record<string, unknown> = {},
+  ) {
+    if (query && Object.keys(query).length > 0) {
+      throw new BadRequestException("my-signup does not accept query parameters");
+    }
+    const actorDiscordId = parseActorDiscordId(actorHeader);
+    if (!actorDiscordId) {
+      throw new BadRequestException(
+        `${ACTOR_ASSERTION_HEADER} must be a valid Discord user id`,
+      );
+    }
+    return this.events.getMySignup(id, actorDiscordId);
   }
 
   @Post()

@@ -34,43 +34,31 @@ const rowSummary = (event: Parameters<typeof eventButtons>[0]) =>
     row.components.map((c) => [c.custom_id, c.label, c.style]),
   );
 
-describe("API eventButtons (characterization)", () => {
-  it("D&D layout", () => {
-    expect(rowSummary(baseEvent)).toEqual([
-      [
-        ["rsvp:evt1:NORMAL", "RSVP Normal", 3],
-        ["rsvp:evt1:HEROIC", "RSVP Heroic", 1],
-        ["guest:evt1", "Guests", 2],
-        ["host:evt1", "DM Signup", 2],
-        ["assignment:evt1", "My Assignment", 2],
-      ],
-      [
-        ["backup_dm:evt1", "Backup DM Signup", 1],
-        ["cancel_rsvp:evt1", "Cancel RSVP", 4],
-        ["prefs:evt1", "Preferences", 2],
-      ],
-    ]);
+describe("API eventButtons", () => {
+  const PUBLIC_ROW = [
+    ["join:evt1", "Join", 3],
+    ["run_table:evt1", "Run a table", 1],
+    ["my_signup:evt1", "My signup", 2],
+  ];
+
+  it("renders the literal public controls as one REST action row", () => {
+    expect(rowSummary(baseEvent)).toEqual([PUBLIC_ROW]);
     expect(eventButtons(baseEvent).every((r) => r.type === 1)).toBe(true);
-  });
-
-  it("non-D&D without guests", () => {
-    const rows = rowSummary({
-      ...baseEvent,
-      gameSystem: "Daggerheart",
-      eventType: { allowsGuests: false },
-    });
-    expect(rows[0]).toEqual([
-      ["rsvp:evt1:MIXED", "RSVP", 3],
-      ["host:evt1", "GM Signup", 2],
-      ["assignment:evt1", "My Assignment", 2],
-    ]);
-  });
-
-  it("null eventType keeps guests; cancelled renders nothing", () => {
     expect(
-      rowSummary({ ...baseEvent, eventType: null })[0].map((b) => b[0]),
-    ).toContain("guest:evt1");
+      rowSummary({
+        ...baseEvent,
+        gameSystem: "Daggerheart",
+        eventType: { allowsGuests: false },
+      }),
+    ).toEqual([PUBLIC_ROW]);
+  });
+
+  it("cancelled and completed events render nothing; locked keeps My signup", () => {
     expect(eventButtons({ ...baseEvent, status: "CANCELLED" })).toEqual([]);
+    expect(eventButtons({ ...baseEvent, status: "COMPLETED" })).toEqual([]);
+    expect(rowSummary({ ...baseEvent, status: "LOCKED" })).toEqual([
+      [["my_signup:evt1", "My signup", 2]],
+    ]);
   });
 });
 
