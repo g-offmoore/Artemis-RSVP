@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./event-presentation": {
+      "types": "./dist/event-presentation.d.ts",
+      "default": "./dist/event-presentation.js"
     }
   },
   "scripts": {
