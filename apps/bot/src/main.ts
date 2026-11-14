@@ -69,6 +69,9 @@ const logger = pino({
     "token",
     "*.token",
   ],
+  // pino only serializes Error objects under `err` by default; call sites here
+  // log them as `error`, which otherwise renders as `{}` with no message/stack.
+  serializers: { error: pino.stdSerializers.err },
 });
 const api = new ArtemisApi(config);
 const client = new Client({
@@ -98,8 +101,8 @@ client.on(Events.GuildCreate, async (guild) => {
 });
 
 client.on("error", (error) => logger.error({ error }, "Discord client error"));
-client.on("shardError", (error) =>
-  logger.error({ error }, "Discord shard error"),
+client.on("shardError", (error, shardId) =>
+  logger.error({ error, shardId }, "Discord shard error"),
 );
 
 client.on("interactionCreate", async (interaction) => {

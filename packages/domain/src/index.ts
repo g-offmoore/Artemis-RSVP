@@ -337,8 +337,6 @@ export type EventUpdateInput = z.infer<typeof eventUpdateSchema>;
 
 // ─── Event series schemas ─────────────────────────────────────────────────
 
-const weekdaySchema = z.enum(["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]);
-
 export const eventSeriesCreateSchema = z.object({
   guildId: z.string().min(1),
   eventType: eventTypeOverridesSchema,

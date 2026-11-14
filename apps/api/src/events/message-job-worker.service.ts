@@ -9,13 +9,6 @@ import { DiscordRoleService } from "./discord-role.service.js";
 
 const JOB_NAME = "artemis.message-job-poll";
 
-// Shape returned by listBackupDmCandidates (plain objects, not full service).
-type BackupCandidate = {
-  discordUserId: string;
-  participantId: string | null;
-  backupDmStatus: string | null;
-};
-
 @Injectable()
 export class MessageJobWorkerService implements OnModuleInit {
   private readonly logger = new Logger(MessageJobWorkerService.name);
@@ -113,7 +106,7 @@ export class MessageJobWorkerService implements OnModuleInit {
         break;
       case "ASSIGNMENT_LOCK":
         // P0: run and lock final assignments T-1h before event start (rules.md §11.1).
-        await this.runAssignmentLock(job, token);
+        await this.runAssignmentLock(job);
         break;
       case "BACKUP_DM_FOLLOW_UP":
         // Fires 1h after the T-3h backup DM ask; notifies organizer if no one accepted.
@@ -316,10 +309,7 @@ export class MessageJobWorkerService implements OnModuleInit {
   // Runs and locks assignments exactly 1 hour before event start.
   // This is a P0 requirement per rules.md §11.1, §11.2.
 
-  private async runAssignmentLock(
-    job: { id: string; eventId: string },
-    token: string,
-  ) {
+  private async runAssignmentLock(job: { id: string; eventId: string }) {
     this.logger.log(`Running assignment lock for event ${job.eventId} (scheduled job ${job.id})`);
     try {
       await this.events.lockAssignments(job.eventId, {
