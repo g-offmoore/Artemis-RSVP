@@ -20,6 +20,28 @@ describe("parseEventDateTimeParts", () => {
     );
   });
 
+  it.each([
+    ["2026-06-18", "00:00", "America/New_York", "2026-06-18T04:00:00.000Z"],
+    ["2026-06-18", "18:30", "Asia/Kathmandu", "2026-06-18T12:45:00.000Z"],
+    ["2026-06-18", "18:30", "UTC", "2026-06-18T18:30:00.000Z"],
+    // Characterization only: the legacy structured API picks the earlier fold.
+    ["2026-11-01", "01:30", "America/New_York", "2026-11-01T05:30:00.000Z"],
+  ])(
+    "preserves structured parsing for %s %s in %s",
+    (date, time, zone, utc) => {
+      expect(parseEventDateTimeParts(date, time, zone).toISOString()).toBe(utc);
+    },
+  );
+
+  it.each([
+    ["2026-02-30", "18:00"],
+    ["2026-03-08", "02:30"],
+  ])("rejects invalid structured date or gap %s %s", (date, time) => {
+    expect(() =>
+      parseEventDateTimeParts(date, time, "America/New_York"),
+    ).toThrow(EventDateTimeInputError);
+  });
+
   it("rejects missing date context", () => {
     expect(() => parseEventDateTimeParts("1700", "1800")).toThrow(
       EventDateTimeInputError,

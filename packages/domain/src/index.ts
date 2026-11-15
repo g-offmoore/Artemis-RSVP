@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatUtcAsTimeZoneParts } from "./timezone-parts.js";
 import {
   DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES,
   isAssignmentLockOffsetMinutes,
@@ -16,23 +17,23 @@ const trimmedOptionalString = (maxLength: number) =>
     z.string().trim().max(maxLength).optional(),
   );
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
-const optionalImageUrlString = z.preprocess(emptyStringToUndefined, z
-  .string()
-  .trim()
-  .url()
-  .max(2048)
-  .refine(
-    (url) => url.startsWith("https://"),
-    "Image URL must use https://.",
-  )
-  .refine((url) => {
-    try {
-      return IMAGE_EXTENSIONS.test(new URL(url).pathname);
-    } catch {
-      return false;
-    }
-  }, "Image URL must end in .png, .jpg, .jpeg, .gif, or .webp.")
-  .optional());
+const optionalImageUrlString = z.preprocess(
+  emptyStringToUndefined,
+  z
+    .string()
+    .trim()
+    .url()
+    .max(2048)
+    .refine((url) => url.startsWith("https://"), "Image URL must use https://.")
+    .refine((url) => {
+      try {
+        return IMAGE_EXTENSIONS.test(new URL(url).pathname);
+      } catch {
+        return false;
+      }
+    }, "Image URL must end in .png, .jpg, .jpeg, .gif, or .webp.")
+    .optional(),
+);
 
 const eventDateSchema = z.preprocess(
   (value) => {
@@ -152,7 +153,10 @@ export type EventTypeUpdateInput = z.infer<typeof eventTypeUpdateSchema>;
 // Non-negative whole minutes, bounded by PostgreSQL's Int column. No coercion.
 export const assignmentLockOffsetMinutesSchema = z
   .number()
-  .refine(isAssignmentLockOffsetMinutes, "Invalid assignment lock offset minutes");
+  .refine(
+    isAssignmentLockOffsetMinutes,
+    "Invalid assignment lock offset minutes",
+  );
 
 export const eventCreateSchema = z.object({
   guildId: z.string().min(1),
@@ -169,7 +173,13 @@ export const eventCreateSchema = z.object({
   assignmentLockOffsetMinutes: assignmentLockOffsetMinutesSchema.default(
     DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES,
   ),
-  shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
+  shortageAlertHoursBefore: z
+    .number()
+    .int()
+    .min(1)
+    .max(168)
+    .nullable()
+    .optional(),
   createdByDiscordId: z.string().min(1),
   seriesId: z.string().optional(),
 });
@@ -296,28 +306,6 @@ function zonedDateTimeToUtc(
   return result;
 }
 
-function formatUtcAsTimeZoneParts(date: Date, timeZone: string) {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
-  const parts = Object.fromEntries(
-    formatter.formatToParts(date).map((part) => [part.type, part.value]),
-  );
-  return {
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
-    hour: Number(parts.hour),
-    minute: Number(parts.minute),
-  };
-}
-
 export const eventUpdateSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(2000).nullable().optional(),
@@ -346,7 +334,13 @@ export const eventUpdateSchema = z.object({
   startAt: eventDateSchema.optional(),
   endAt: eventDateSchema.optional(),
   assignmentLockOffsetMinutes: assignmentLockOffsetMinutesSchema.optional(),
-  shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
+  shortageAlertHoursBefore: z
+    .number()
+    .int()
+    .min(1)
+    .max(168)
+    .nullable()
+    .optional(),
   actorDiscordId: z.string().min(1),
   applyToFuture: z.boolean().optional(),
 });
@@ -375,7 +369,13 @@ export const eventSeriesCreateSchema = z.object({
   defaultStartHour: z.number().int().min(0).max(23).default(18),
   defaultStartMinute: z.number().int().min(0).max(59).default(0),
   defaultDurationMinutes: z.number().int().min(30).max(720).default(240),
-  shortageAlertHoursBefore: z.number().int().min(1).max(168).nullable().optional(),
+  shortageAlertHoursBefore: z
+    .number()
+    .int()
+    .min(1)
+    .max(168)
+    .nullable()
+    .optional(),
   createdByDiscordId: z.string().min(1),
 });
 export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateSchema>;
@@ -386,7 +386,13 @@ export const seriesGenerateSchema = z.object({
 export type SeriesGenerateInput = z.infer<typeof seriesGenerateSchema>;
 
 export const WEEKDAY_TO_JS: Record<string, number> = {
-  SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6,
+  SUN: 0,
+  MON: 1,
+  TUE: 2,
+  WED: 3,
+  THU: 4,
+  FRI: 5,
+  SAT: 6,
 };
 
 export type WeeklyRecurrence = { weekday: string; intervalWeeks: 1 | 2 };
@@ -402,7 +408,9 @@ export function parseRecurrenceRule(rule: string): WeeklyRecurrence {
 }
 
 export function formatRecurrenceRule(value: WeeklyRecurrence): string {
-  return value.intervalWeeks === 2 ? `WEEKLY:${value.weekday}:2` : `WEEKLY:${value.weekday}`;
+  return value.intervalWeeks === 2
+    ? `WEEKLY:${value.weekday}:2`
+    : `WEEKLY:${value.weekday}`;
 }
 
 /**
@@ -412,7 +420,11 @@ export function formatRecurrenceRule(value: WeeklyRecurrence): string {
  * `(b.getTime() - a.getTime()) / 86400000` would be off by an hour across a
  * spring-forward/fall-back boundary.
  */
-export function calendarDaysBetweenInTimezone(a: Date, b: Date, tz: string): number {
+export function calendarDaysBetweenInTimezone(
+  a: Date,
+  b: Date,
+  tz: string,
+): number {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     year: "numeric",
@@ -426,13 +438,15 @@ export function calendarDaysBetweenInTimezone(a: Date, b: Date, tz: string): num
     const day = parseInt(parts.find((p) => p.type === "day")!.value, 10);
     return Date.UTC(year, month - 1, day);
   };
-  return Math.round((toUtcDateOnly(b) - toUtcDateOnly(a)) / (24 * 60 * 60 * 1000));
+  return Math.round(
+    (toUtcDateOnly(b) - toUtcDateOnly(a)) / (24 * 60 * 60 * 1000),
+  );
 }
 
 export function nextWeekdayDate(from: Date, targetDay: number): Date {
   const date = new Date(from);
   const current = date.getDay();
-  const daysAhead = ((targetDay - current + 7) % 7) || 7;
+  const daysAhead = (targetDay - current + 7) % 7 || 7;
   date.setDate(date.getDate() + daysAhead);
   return date;
 }
@@ -443,17 +457,27 @@ export function nextWeekdayDate(from: Date, targetDay: number): Date {
  * computing the current day-of-week in `tz` rather than server-local time.
  * Uses pure ms arithmetic (avoids setDate() local-time ambiguity near midnight).
  */
-export function nextWeekdayDateInTimezone(from: Date, targetDay: number, tz: string): Date {
+export function nextWeekdayDateInTimezone(
+  from: Date,
+  targetDay: number,
+  tz: string,
+): Date {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     weekday: "short",
   }).formatToParts(from);
   const weekdayName = parts.find((p) => p.type === "weekday")!.value;
   const JS_DAY: Record<string, number> = {
-    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
   };
   const current = JS_DAY[weekdayName] ?? 0;
-  const daysAhead = ((targetDay - current + 7) % 7) || 7;
+  const daysAhead = (targetDay - current + 7) % 7 || 7;
   return new Date(from.getTime() + daysAhead * 24 * 60 * 60 * 1000);
 }
 
@@ -487,7 +511,10 @@ export function makeDateInTimezone(
     hourCycle: "h23",
   });
   const getPart = (type: string) =>
-    parseInt(fmt.formatToParts(approxUtc).find((p) => p.type === type)!.value, 10);
+    parseInt(
+      fmt.formatToParts(approxUtc).find((p) => p.type === type)!.value,
+      10,
+    );
 
   const tzYear = getPart("year");
   const tzMonth = getPart("month");
@@ -497,7 +524,14 @@ export function makeDateInTimezone(
 
   // Step 3: compute the difference between what we wanted and what the TZ shows
   const wantedUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
-  const tzShowsAsUtcMs = Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute, 0);
+  const tzShowsAsUtcMs = Date.UTC(
+    tzYear,
+    tzMonth - 1,
+    tzDay,
+    tzHour,
+    tzMinute,
+    0,
+  );
   const offsetMs = wantedUtcMs - tzShowsAsUtcMs;
 
   return new Date(approxUtc.getTime() + offsetMs);
@@ -585,7 +619,10 @@ export function checkEligibility(
   // Denied roles are always a hard block regardless of other roles.
   for (const denied of rule.deniedDiscordRoleIds) {
     if (memberRoleIds.includes(denied)) {
-      return { eligible: false, reason: "You are not eligible for this signup option." };
+      return {
+        eligible: false,
+        reason: "You are not eligible for this signup option.",
+      };
     }
   }
 
@@ -595,19 +632,28 @@ export function checkEligibility(
       memberRoleIds.includes(id),
     );
     if (!hasAllowed) {
-      return { eligible: false, reason: "You do not have the required role for this signup option." };
+      return {
+        eligible: false,
+        reason: "You do not have the required role for this signup option.",
+      };
     }
   }
 
   // Required: every listed role must be present.
   for (const required of rule.requiredDiscordRoleIds) {
     if (!memberRoleIds.includes(required)) {
-      return { eligible: false, reason: "You do not have the required role for this signup option." };
+      return {
+        eligible: false,
+        reason: "You do not have the required role for this signup option.",
+      };
     }
   }
 
   if (rule.requiresApproval) {
-    return { eligible: true, requiresApproval: true } as { eligible: true; requiresApproval: true };
+    return { eligible: true, requiresApproval: true } as {
+      eligible: true;
+      requiresApproval: true;
+    };
   }
 
   return { eligible: true };
@@ -641,7 +687,10 @@ export type AssignmentParticipant = {
   preferredTableIds?: string[];
   // Seating group membership
   seatingGroupId?: string | null;
-  seatingGroupSplitPolicy?: "DO_NOT_SPLIT" | "SPLIT_IF_NEEDED" | "ORGANIZER_DECIDES";
+  seatingGroupSplitPolicy?:
+    | "DO_NOT_SPLIT"
+    | "SPLIT_IF_NEEDED"
+    | "ORGANIZER_DECIDES";
 };
 
 export type AssignmentTable = {
@@ -721,10 +770,7 @@ export function assignParticipantsToTables(
   // This starts from locked/existing assignments and grows as we assign.
   const tableOccupants = new Map<string, Set<string>>();
   for (const table of tables) {
-    tableOccupants.set(
-      table.id,
-      new Set(table.existingParticipantIds),
-    );
+    tableOccupants.set(table.id, new Set(table.existingParticipantIds));
   }
 
   const sortedParties = groupParties(participants).sort(
@@ -815,7 +861,8 @@ export function assignParticipantsToTables(
         if (candidate.hasAvoidConflict) {
           warnings.push({
             code: "AVOID_CONSTRAINT_APPLIED",
-            message: "A table was excluded due to an avoid-participant constraint.",
+            message:
+              "A table was excluded due to an avoid-participant constraint.",
             participantIds: party.participants.map((p) => p.id),
             tableId: candidate.table.id,
           });
@@ -1013,12 +1060,12 @@ export function temporaryRoleName(
 
 // Default offsets for automatically scheduled messages.
 export const MESSAGE_JOB_DEFAULTS = {
-  preEventOffsetMs: 2 * 60 * 60 * 1000,      // 2 hours before startAt
-  postEventOffsetMs: 60 * 60 * 1000,          // 1 hour after endAt
+  preEventOffsetMs: 2 * 60 * 60 * 1000, // 2 hours before startAt
+  postEventOffsetMs: 60 * 60 * 1000, // 1 hour after endAt
   // T-24h: readiness/warning pass, does not lock anything (rules.md §11.1).
-  preflightOffsetMs: 24 * 60 * 60 * 1000,     // 24 hours before startAt
-  reminderOffsetMs: 4 * 60 * 60 * 1000,       // 4 hours before startAt — organizer warning
-  backupDmAskOffsetMs: 3 * 60 * 60 * 1000,   // 3 hours before startAt — backup DM consent ask
+  preflightOffsetMs: 24 * 60 * 60 * 1000, // 24 hours before startAt
+  reminderOffsetMs: 4 * 60 * 60 * 1000, // 4 hours before startAt — organizer warning
+  backupDmAskOffsetMs: 3 * 60 * 60 * 1000, // 3 hours before startAt — backup DM consent ask
   // One hour is the default, not an override of stored event policy (§11.1).
   assignmentLockOffsetMs: DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES * 60 * 1000,
 } as const;
@@ -1034,10 +1081,14 @@ export function computePostEventScheduledFor(endAt: Date): Date {
 // T-{N}h: readiness/warning pass — capacity, category, DM, backup DM, and guest
 // warnings, surfaced privately to the organizer. Does not lock participant changes.
 // When overrideHours is provided (per-event/series config), it replaces the 24h default.
-export function computePreflightScheduledFor(startAt: Date, overrideHours?: number | null): Date {
-  const offsetMs = overrideHours != null
-    ? overrideHours * 60 * 60 * 1000
-    : MESSAGE_JOB_DEFAULTS.preflightOffsetMs;
+export function computePreflightScheduledFor(
+  startAt: Date,
+  overrideHours?: number | null,
+): Date {
+  const offsetMs =
+    overrideHours != null
+      ? overrideHours * 60 * 60 * 1000
+      : MESSAGE_JOB_DEFAULTS.preflightOffsetMs;
   return new Date(startAt.getTime() - offsetMs);
 }
 
