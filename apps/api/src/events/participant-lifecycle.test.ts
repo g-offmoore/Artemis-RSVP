@@ -139,6 +139,21 @@ describe("cancelRsvp", () => {
     expect(rsvpUpdate).not.toHaveBeenCalled();
   });
 
+  it("refuses to cancel an organizer-removed RSVP without writes or role changes", async () => {
+    const existing = { id: "r1", status: "REMOVED" };
+    const { service, prisma, transaction, rsvpUpdate } = setup({}, existing);
+
+    await expect(service.cancelRsvp("evt1", ACTOR)).rejects.toMatchObject({
+      status: 403,
+      message:
+        "This signup was removed by an organizer and cannot be cancelled.",
+    });
+    expect(existing.status).toBe("REMOVED");
+    expect(rsvpUpdate).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+    expect(prisma.client.eventRole.findUnique).not.toHaveBeenCalled();
+  });
+
   it("cancels an active RSVP as before", async () => {
     const { service, rsvpUpdate } = setup({}, { id: "r1", status: "GOING" });
     await service.cancelRsvp("evt1", ACTOR);

@@ -868,6 +868,11 @@ export class EventsService {
       },
     });
     if (!existingRsvp) throw new NotFoundException("RSVP not found");
+    if (existingRsvp.status === "REMOVED") {
+      throw new ForbiddenException(
+        "This signup was removed by an organizer and cannot be cancelled.",
+      );
+    }
     // Idempotent: a stale panel pressing cancel twice must not write a second
     // audit entry or re-run side effects.
     if (existingRsvp.status === "CANCELLED") return existingRsvp;

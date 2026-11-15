@@ -103,6 +103,9 @@ button is not enforcement:
   The web dashboard does not call this endpoint.
 - `cancelRsvp` returns 404 (not a Prisma error) when the user has no RSVP and
   is idempotent for an already-cancelled RSVP (no duplicate audit row).
+- `cancelRsvp` refuses organizer-removed (`REMOVED`) RSVPs with a safe 403
+  before any write or Discord role change. Legacy `cancel_rsvp:` cannot convert
+  removal into `CANCELLED` and thereby expose Join in the personal panel.
 - Active cancellation is refused on cancelled/completed/archived/in-progress
   events. Existing pre-lock and post-lock player cancellation remains supported;
   it deactivates guests with the owner, rather than deleting their history.
@@ -154,6 +157,10 @@ change). Revert this PR before reverting P01a.
   category (Q01).
 - Organizer-removed (`REMOVED`) users are shown a neutral "not active" and no
   Join; the legacy `rsvp:` path can still re-register them (existing behavior).
+  Re-registration policy is unchanged by the cancellation guard.
+- Legacy `backup_dm:` still resets an existing Heroic player's category to NORMAL.
+  The new panel preserves the player's category; fixing the legacy handler is
+  deferred, not included in this independent-review cancellation fix.
 - GM-owned guest management after backup promotion and combined/mixed guest
   list editing remain deferred. Contact organizers for these cases.
 - `main.ts` has an executed transport-faked harness of its actual
@@ -200,6 +207,31 @@ Focused Prettier covers all new files and changed presentation/adapter tests.
 The controller, service, bot API, main and domain index still have formatting
 warnings also present in the base revision; whole-file reformatting is excluded
 to avoid unrelated churn. No test timeout was increased or tests weakened.
+
+## Independent-review cancellation fix evidence
+
+Scope: only the forbidden `REMOVED -> CANCELLED` transition, reproduced against
+`e2b2342079441ff05f40b341e38cfbe73db752ab`. No schema, dependency, configuration,
+re-registration policy, assignment/recalculation or legacy backup-handler changes.
+
+- Added a behavioral regression beside the existing cancellation tests in
+  `apps/api/src/events/participant-lifecycle.test.ts`, invoking the real
+  `EventsService.cancelRsvp` with faked persistence (no live database).
+- RED: `npm test -- apps/api/src/events/participant-lifecycle.test.ts` exited 1:
+  1 failed / 15 passed. The new rejection assertion instead received
+  `{ id: 'r1', status: 'CANCELLED' }`, confirming the review finding before the fix.
+- Minimal fix: reject `REMOVED` with `ForbiddenException` (403) before mutation.
+- GREEN: the same focused command exited 0, 16 tests passed. The regression
+  checks the safe status/message, unchanged REMOVED status, no RSVP update or
+  transaction (including nested participant/audit writes), and no role lookup.
+  Existing active cancellation and already-cancelled idempotency remain green.
+- Full `npm test` exited 0: 29 files / 421 tests passed at the default timeout.
+- `npm run lint`, `npm run typecheck`, `npm run check:deploy` and
+  `git diff --check` exited 0. Typecheck generated the local Prisma client;
+  no migration or deployment was run.
+- Existing Vite config-loader warning remains; Git also reported LF-to-CRLF
+  normalization for the test file. No timeout, test configuration or test
+  expectations were weakened. No live Discord or PostgreSQL verification.
 
 ## Rollback
 
