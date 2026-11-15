@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./event-window-parser": {
+      "types": "./dist/event-window-parser.d.ts",
+      "default": "./dist/event-window-parser.js"
+    },
     "./event-presentation": {
       "types": "./dist/event-presentation.d.ts",
       "default": "./dist/event-presentation.js"
@@ -21,6 +25,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "chrono-node": "2.10.3",
     "zod": "4.6.7"
   },
   "devDependencies": {
