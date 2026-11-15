@@ -126,6 +126,46 @@ Exact execution results and any limitations are recorded in the completion
 manifest outside the repository (`artemis-p03a-result.json`). Production smoke,
 Docker deployment and database integration are not claimed by these gates.
 
+## Review repair — strict ISO calendar validation
+
+The reviewer found that `2026-13-05 6pm` with reference
+`2026-01-01T00:00:00Z` and policy zone `UTC` was accepted as May 13.
+The grammar checked the ISO shape only; pinned chrono-node reinterpreted the
+invalid month/day order as `{ year: 2026, month: 5, day: 13 }`. Zone round trips
+then validated those reinterpreted components rather than the typed date.
+
+This repair adds direct validation of the typed ISO calendar components after
+grammar validation and before chrono: month 1–12, day 1 through the month's
+Gregorian length, including the divisible-by-4/100/400 leap-year rule. Invalid
+dates return `UNSUPPORTED_INPUT` before calendar resolution or temporal bounds;
+`2026-13-01 6pm` therefore cannot become `START_NOT_FUTURE`. Invalid dates are
+not normalized or swapped. Supported grammar and existing structured APIs are
+unchanged.
+
+Fresh repair TDD evidence (not inherited TDD): the new exact reviewer regression
+was run alone before production edits and failed its equality assertion,
+receiving `ok: true`, start `2026-05-13T18:00:00.000Z`, rather than
+`{ ok: false, code: "UNSUPPORTED_INPUT" }`. After the minimal validator was
+added, the identical command passed:
+`npm test -- packages/domain/src/event-window-parser.test.ts -t 'rejects an invalid ISO month'`.
+Additional regression coverage checks months 00/13/99, zero/overflow days,
+30-day month overflow, non-leap February, leap February overflow, century 2100
+rejection, valid ISO ordering and month boundaries, and leap years 2028/2000.
+These additional checks are regression coverage, not separate observed RED cycles.
+
+Repair gates passed on Node v26.4.0 / npm 11.17.0: focused parser/datetime
+130 tests, full unmodified-default-timeout `npm test` 22 files / 373 tests,
+`npm run typecheck`, `npm run lint`, `npm run check:deploy`, `npm run build`,
+focused Prettier check and `git diff --check`. Built-package subpath assertions
+passed for 10 invalid and 7 valid ISO dates, the existing Friday/New York case,
+and the legacy structured New York fold. The generated Next root-params import
+in `next-env.d.ts` was inspected and only that generated churn was restored.
+The pre-existing Vite config-loader warning remains; Node 24, production smoke,
+Docker deployment and database integration were not executed. Typecheck/build
+used only a nonsecret localhost placeholder `DATABASE_URL` for generation, with
+no database operation. No push, PR, merge, deployment, migration, credentials,
+configuration or CI changes form part of this bounded repair.
+
 ## Dependency, rollback and deferred P03b
 
 `chrono-node` 2.10.3 is a pinned runtime dependency of `@artemis/domain` (MIT,

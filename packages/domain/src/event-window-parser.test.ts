@@ -35,6 +35,49 @@ function expectWindow(
 }
 
 describe("parseNaturalEventWindow", () => {
+  it("rejects an invalid ISO month instead of swapping month and day", () => {
+    expect(
+      parse("2026-13-05 6pm", new Date("2026-01-01T00:00:00Z"), "UTC"),
+    ).toEqual({ ok: false, code: "UNSUPPORTED_INPUT" });
+  });
+
+  it.each([
+    "2026-13-01 6pm",
+    "2026-00-05 6pm",
+    "2026-99-05 6pm",
+    "2026-01-00 6pm",
+    "2026-01-32 6pm",
+    "2026-04-31 at 18:00 for 2h",
+    "2026-02-29 6pm",
+    "2028-02-30 6pm",
+    "2100-02-29 6pm",
+  ])(
+    "rejects invalid ISO calendar components before temporal bounds: %s",
+    (text) => {
+      expect(parse(text, new Date("2026-01-01T00:00:00Z"), "UTC")).toEqual({
+        ok: false,
+        code: "UNSUPPORTED_INPUT",
+      });
+    },
+  );
+
+  it.each([
+    ["2026-01-05 6pm", "2026-01-01T00:00:00Z", "2026-01-05T18:00:00.000Z"],
+    ["2026-05-13 at 18:00", "2026-01-01T00:00:00Z", "2026-05-13T18:00:00.000Z"],
+    ["2026-12-31 6pm", "2026-01-01T00:00:00Z", "2026-12-31T18:00:00.000Z"],
+    ["2026-04-30 6pm", "2026-01-01T00:00:00Z", "2026-04-30T18:00:00.000Z"],
+    ["2026-02-28 6pm", "2026-01-01T00:00:00Z", "2026-02-28T18:00:00.000Z"],
+    ["2028-02-29 6pm", "2028-01-01T00:00:00Z", "2028-02-29T18:00:00.000Z"],
+    ["2000-02-29 6pm", "2000-01-01T00:00:00Z", "2000-02-29T18:00:00.000Z"],
+  ])(
+    "preserves valid ISO calendar components: %s",
+    (text, reference, start) => {
+      const result = parse(text, new Date(reference), "UTC");
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.window.startAt.toISOString()).toBe(start);
+    },
+  );
+
   it.each([
     "friday",
     "fri 6",

@@ -104,6 +104,28 @@ export function parseNaturalEventWindow(input: {
     return { ok: false, code: "OUT_OF_RANGE" };
   if (!relative && !calendarSyntax.test(text))
     return { ok: false, code: "UNSUPPORTED_INPUT" };
+  const isoDate = /^(\d{4})-(\d{2})-(\d{2}) /.exec(text);
+  if (isoDate) {
+    const [, year, month, day] = isoDate.map(Number);
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const daysInMonth = [
+      31,
+      leapYear ? 29 : 28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31,
+    ];
+    // Validate the typed ISO order before chrono can reinterpret an invalid date.
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1])
+      return { ok: false, code: "UNSUPPORTED_INPUT" };
+  }
   const localNow = formatUtcAsTimeZoneParts(input.now, input.timeZone);
   // A UTC surrogate represents the reference's wall clock, not a real event instant.
   const reference = Date.UTC(
