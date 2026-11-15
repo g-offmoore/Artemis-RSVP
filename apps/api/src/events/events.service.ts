@@ -7,12 +7,14 @@ import {
 } from "@nestjs/common";
 import {
   assignParticipantsToTables,
+  buildMySignupView,
   checkEligibility,
   eligibilityRuleSchema,
   eventCreateSchema,
   eventUpdateSchema,
   eventTypeUpdateSchema,
   guestUpdateSchema,
+  parseActorDiscordId,
   rsvpCreateSchema,
   tableCreateSchema,
   type AssignmentResult,
@@ -170,6 +172,98 @@ export class EventsService {
 
     if (!event) throw new NotFoundException("Event not found");
     return event;
+  }
+
+  // Participant-safe view for ONE acting participant (P01b "My signup").
+  // `actorDiscordId` is an internal bot assertion, not user authentication:
+  // the controller only accepts it from the internal-token + guild protected
+  // route's assertion header. Every query below is bound to the actor and uses
+  // an explicit field allow-list; buildMySignupView sanitizes again.
+  async getMySignup(eventId: string, actorDiscordId: string) {
+    const actor = parseActorDiscordId(actorDiscordId);
+    if (!actor) {
+      throw new BadRequestException("A valid acting Discord user id is required");
+    }
+
+    const event = await this.prisma.client.event.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        gameSystem: true,
+        startAt: true,
+        endAt: true,
+        signupOpensAt: true,
+        signupClosesAt: true,
+        assignmentLockedAt: true,
+        eventType: { select: { allowsGuests: true, maxGuestsPerRsvp: true } },
+      },
+    });
+    if (!event) throw new NotFoundException("Event not found");
+
+    const [rsvp, tables] = await Promise.all([
+      this.prisma.client.rSVP.findUnique({
+        where: {
+          eventId_primaryDiscordUserId: {
+            eventId,
+            primaryDiscordUserId: actor,
+          },
+        },
+        select: {
+          primaryDiscordUserId: true,
+          status: true,
+          signupRole: true,
+          selectedCategory: true,
+          participants: {
+            select: {
+              id: true,
+              participantType: true,
+              discordUserId: true,
+              displayName: true,
+              signupRole: true,
+              backupDmStatus: true,
+              assignmentEligible: true,
+              partyOwnerParticipantId: true,
+              assignments: {
+                select: {
+                  status: true,
+                  createdAt: true,
+                  eventTable: {
+                    select: {
+                      title: true,
+                      tableType: true,
+                      ambassadorProfile: { select: { displayName: true } },
+                    },
+                  },
+                },
+                orderBy: { createdAt: "desc" },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.client.eventTable.findMany({
+        where: {
+          eventId,
+          status: { notIn: ["CANCELLED", "COMPLETED"] },
+          ambassadorProfile: { discordUserId: actor },
+        },
+        select: {
+          id: true,
+          title: true,
+          tableType: true,
+          softCap: true,
+          hardCap: true,
+          status: true,
+          ambassadorProfile: {
+            select: { discordUserId: true, displayName: true },
+          },
+        },
+      }),
+    ]);
+
+    return buildMySignupView({ event, rsvp, tables }, actor);
   }
 
   async create(raw: unknown) {
@@ -482,6 +576,7 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    assertParticipantMutable(event);
     checkRegistrationWindow(event);
 
     // TODO(product-feedback): RSVP inputs are fixed. Replace with configurable
@@ -506,6 +601,13 @@ export class EventsService {
     const result = await this.prisma.client.$transaction(async (tx) => {
       // Enforce RSVP role exclusivity (rules.md §4.1, §5.3, §7.2):
       // Active DM/GM and Player/BackupDM registrations are mutually exclusive.
+      if (input.signupRole === "PLAYER" || input.signupRole === "BACKUP_DM") {
+        const table = await tx.eventTable.findFirst({
+          where: { eventId, status: { notIn: ["CANCELLED", "COMPLETED"] }, ambassadorProfile: { discordUserId: input.discordUserId } },
+          select: { id: true },
+        });
+        if (table) throw new ForbiddenException("You are already running a table. Contact an organizer to change roles.");
+      }
       const existingRsvp = await tx.rSVP.findUnique({
         where: {
           eventId_primaryDiscordUserId: {
@@ -600,6 +702,9 @@ export class EventsService {
           playerCategory: selectedCategory,
           signupRole: input.signupRole,
           backupDmStatus,
+          ...(existingRsvp?.status === "CANCELLED"
+            ? { assignmentEligible: true, attendanceEligible: true }
+            : {}),
           confirmationStatus: "UNKNOWN",
         },
       });
@@ -658,6 +763,14 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    assertParticipantMutable(event);
+    if (event.assignmentLockedAt) {
+      // rules.md 6.4: guest changes after lock require organizer policy, and
+      // none exists for participants yet, so participants cannot change them.
+      throw new ForbiddenException(
+        "Assignments are locked for this event. Ask an organizer to change your guests.",
+      );
+    }
     if (!event.eventType.allowsGuests) throw new ForbiddenException("This event does not allow guests.");
     checkRegistrationWindow(event);
     if (input.guests.length > event.eventType.maxGuestsPerRsvp) {
@@ -676,6 +789,9 @@ export class EventsService {
       include: { participants: true },
     });
     if (!rsvp) throw new NotFoundException("RSVP not found");
+    if (rsvp.status !== "GOING" && rsvp.status !== "WAITLISTED") {
+      throw new ForbiddenException("An active player signup is required to manage guests.");
+    }
 
     return this.prisma.client.$transaction(async (tx) => {
       await tx.eventParticipant.deleteMany({
@@ -743,6 +859,26 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
 
+    const existingRsvp = await this.prisma.client.rSVP.findUnique({
+      where: {
+        eventId_primaryDiscordUserId: {
+          eventId,
+          primaryDiscordUserId: discordUserId,
+        },
+      },
+    });
+    if (!existingRsvp) throw new NotFoundException("RSVP not found");
+    if (existingRsvp.status === "REMOVED") {
+      throw new ForbiddenException(
+        "This signup was removed by an organizer and cannot be cancelled.",
+      );
+    }
+    // Idempotent: a stale panel pressing cancel twice must not write a second
+    // audit entry or re-run side effects.
+    if (existingRsvp.status === "CANCELLED") return existingRsvp;
+    if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    assertParticipantMutable(event);
+
     // TODO(product-feedback): Automatically rerun assignments, promote
     // waitlisted users, notify affected users, and refresh Discord displays when
     // an RSVP is cancelled.
@@ -805,6 +941,7 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException("Event not found");
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
+    assertParticipantMutable(event);
     checkRegistrationWindow(event);
 
     // TODO(product-feedback): This is occurrence-specific table registration,
@@ -832,9 +969,9 @@ export class EventsService {
       },
     });
     if (existingPlayerRsvp && existingPlayerRsvp.status !== "CANCELLED") {
-      // BACKUP_DM may register a table — they are eligible to convert to active DM.
-      // Only a pure PLAYER RSVP (no DM intent) conflicts with TABLE_DM registration.
-      if (existingPlayerRsvp.signupRole === "PLAYER") {
+      // Backup availability is still a player registration. Promotion needs
+      // explicit consent and owned-guest handling, not a table-form shortcut.
+      if (existingPlayerRsvp.signupRole === "PLAYER" || existingPlayerRsvp.signupRole === "BACKUP_DM") {
         throw new ForbiddenException(
           "You are already registered as a player for this event. A player cannot also register as a DM.",
         );
@@ -1618,6 +1755,7 @@ export class EventsService {
     if (event.status === "CANCELLED") throw new ForbiddenException("This event has been cancelled.");
 
     // Find existing preference of this type for the same target.
+    assertPreferenceMutable(event);
     const existing = await this.prisma.client.eventSignupPreference.findFirst({
       where: {
         eventId,
@@ -1654,6 +1792,9 @@ export class EventsService {
     if (pref.userId !== userId) {
       throw new ForbiddenException("Cannot delete another user's preference");
     }
+    const event = await this.prisma.client.event.findUnique({ where: { id: pref.eventId } });
+    if (!event) throw new NotFoundException("Event not found");
+    assertPreferenceMutable(event);
     return this.prisma.client.eventSignupPreference.delete({
       where: { id: prefId },
     });
@@ -1768,10 +1909,43 @@ function usesDndCategories(gameSystem: string) {
   return value === "d&d" || value === "dnd" || value.includes("dungeons");
 }
 
+// Ended or running events are read-only for participant-driven changes
+// (rules.md 6.8, 6.9). CANCELLED is handled by the callers' existing message.
+function assertParticipantMutable(event: { status: string }) {
+  if (
+    event.status === "COMPLETED" ||
+    event.status === "ARCHIVED" ||
+    event.status === "IN_PROGRESS"
+  ) {
+    throw new ForbiddenException(
+      event.status === "IN_PROGRESS"
+        ? "This event has already started, so signups can no longer be changed."
+        : "This event has ended, so signups can no longer be changed.",
+    );
+  }
+}
+
+function assertPreferenceMutable(event: { status: string; assignmentLockedAt: Date | null }) {
+  assertParticipantMutable(event);
+  if (event.status === "CANCELLED" || event.status === "LOCKED" || event.assignmentLockedAt) {
+    throw new ForbiddenException("Preferences cannot be changed for a cancelled or locked event. Contact an organizer.");
+  }
+}
+
 function checkRegistrationWindow(event: {
+  status: string;
+  assignmentLockedAt?: Date | null;
   signupOpensAt: Date | null;
   signupClosesAt: Date | null;
 }) {
+  // Until late-registration/committed-revision policy exists, fail closed for
+  // all participant signup, guest and table paths, including legacy buttons.
+  if (event.assignmentLockedAt || event.status === "LOCKED") {
+    throw new ForbiddenException("Assignments are locked. Contact an organizer to change your signup or table.");
+  }
+  if (event.status === "DRAFT" || event.status === "SIGNUP_CLOSED") {
+    throw new ForbiddenException("Registration is not open for this event.");
+  }
   const now = new Date();
   if (event.signupOpensAt && now < event.signupOpensAt) {
     throw new ForbiddenException("Registration for this event has not opened yet.");

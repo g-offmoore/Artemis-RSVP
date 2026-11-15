@@ -1074,3 +1074,4 @@ export function parseBackupDmCustomId(
 }
 
 export * from "./event-presentation.js";
+export * from "./my-signup.js";

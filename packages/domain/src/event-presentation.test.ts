@@ -75,48 +75,58 @@ describe("resolveEventVocabulary", () => {
 });
 
 describe("buildEventButtonRows", () => {
-  it("D&D keeps legacy custom IDs, labels, styles and order", () => {
-    expect(summary(baseEvent)).toEqual([
-      [
-        ["rsvp:evt1:NORMAL", "RSVP Normal", 3],
-        ["rsvp:evt1:HEROIC", "RSVP Heroic", 1],
-        ["guest:evt1", "Guests", 2],
-        ["host:evt1", "DM Signup", 2],
-        ["assignment:evt1", "My Assignment", 2],
-      ],
-      [
-        ["backup_dm:evt1", "Backup DM Signup", 1],
-        ["cancel_rsvp:evt1", "Cancel RSVP", 4],
-        ["prefs:evt1", "Preferences", 2],
-      ],
-    ]);
+  const PUBLIC_ROW = [
+    ["join:evt1", "Join", 3],
+    ["run_table:evt1", "Run a table", 1],
+    ["my_signup:evt1", "My signup", 2],
+  ];
+
+  it("public controls are literally Join, Run a table, My signup", () => {
+    expect(summary(baseEvent)).toEqual([PUBLIC_ROW]);
   });
 
-  it("non-D&D uses one MIXED RSVP and the system host label", () => {
-    expect(summary({ ...baseEvent, gameSystem: "Pathfinder" })[0]).toEqual([
-      ["rsvp:evt1:MIXED", "RSVP", 3],
-      ["guest:evt1", "Guests", 2],
-      ["host:evt1", "Ambassador Signup", 2],
-      ["assignment:evt1", "My Assignment", 2],
+  it("is identical for every game system and guest policy (details live in the ephemeral panel)", () => {
+    expect(summary({ ...baseEvent, gameSystem: "Pathfinder" })).toEqual([
+      PUBLIC_ROW,
     ]);
+    expect(summary({ ...baseEvent, gameSystem: "Daggerheart" })).toEqual([
+      PUBLIC_ROW,
+    ]);
+    expect(
+      summary({ ...baseEvent, eventType: { allowsGuests: false } }),
+    ).toEqual([PUBLIC_ROW]);
   });
 
-  it("allowsGuests=false removes only the guest button; null keeps it", () => {
-    const ids = (e: EventPresentationInput) => summary(e)[0].map((b) => b[0]);
-    expect(ids({ ...baseEvent, eventType: { allowsGuests: false } })).toEqual([
-      "rsvp:evt1:NORMAL",
-      "rsvp:evt1:HEROIC",
-      "host:evt1",
-      "assignment:evt1",
-    ]);
-    expect(ids({ ...baseEvent, eventType: null })).toContain("guest:evt1");
-    expect(ids({ ...baseEvent, eventType: undefined })).toContain("guest:evt1");
+  it("never exposes organizer actions, diagnostics or legacy action IDs", () => {
+    const ids = buildEventButtonRows(baseEvent)
+      .flat()
+      .map((b) => b.customId.split(":")[0]);
+    expect(ids).toEqual(["join", "run_table", "my_signup"]);
   });
 
-  it("cancelled events have no rows", () => {
-    expect(buildEventButtonRows({ ...baseEvent, status: "CANCELLED" })).toEqual(
-      [],
-    );
+  it("cancelled, completed, archived and draft events have no controls", () => {
+    for (const status of ["CANCELLED", "COMPLETED", "ARCHIVED", "DRAFT"]) {
+      expect(buildEventButtonRows({ ...baseEvent, status })).toEqual([]);
+    }
+  });
+
+  it("closed/locked/in-progress events keep only My signup", () => {
+    const onlyMine = [[["my_signup:evt1", "My signup", 2]]];
+    for (const status of ["LOCKED", "SIGNUP_CLOSED", "IN_PROGRESS"]) {
+      expect(summary({ ...baseEvent, status })).toEqual(onlyMine);
+    }
+    expect(
+      summary({
+        ...baseEvent,
+        assignmentLockedAt: "2026-11-30T22:00:00.000Z",
+      }),
+    ).toEqual(onlyMine);
+  });
+
+  it("open statuses keep all three controls", () => {
+    for (const status of ["SCHEDULED", "SIGNUP_OPEN", undefined, null]) {
+      expect(summary({ ...baseEvent, status })).toEqual([PUBLIC_ROW]);
+    }
   });
 
   it("respects Discord limits (<=5 buttons per row, <=100 char ids)", () => {

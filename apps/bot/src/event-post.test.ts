@@ -34,45 +34,33 @@ const rowSummary = (event: Parameters<typeof eventButtons>[0]) =>
     row.toJSON().components.map((c: any) => [c.custom_id, c.label, c.style]),
   );
 
-describe("bot eventButtons (characterization)", () => {
-  it("D&D: two category RSVPs, guests, host, assignment; second row fixed", () => {
-    expect(rowSummary(baseEvent)).toEqual([
-      [
-        ["rsvp:evt1:NORMAL", "RSVP Normal", 3],
-        ["rsvp:evt1:HEROIC", "RSVP Heroic", 1],
-        ["guest:evt1", "Guests", 2],
-        ["host:evt1", "DM Signup", 2],
-        ["assignment:evt1", "My Assignment", 2],
-      ],
-      [
-        ["backup_dm:evt1", "Backup DM Signup", 1],
-        ["cancel_rsvp:evt1", "Cancel RSVP", 4],
-        ["prefs:evt1", "Preferences", 2],
-      ],
-    ]);
+describe("bot eventButtons", () => {
+  const PUBLIC_ROW = [
+    ["join:evt1", "Join", 3],
+    ["run_table:evt1", "Run a table", 1],
+    ["my_signup:evt1", "My signup", 2],
+  ];
+
+  it("renders the literal public controls Join, Run a table, My signup", () => {
+    expect(rowSummary(baseEvent)).toEqual([PUBLIC_ROW]);
+    expect(
+      rowSummary({
+        ...baseEvent,
+        gameSystem: "Daggerheart",
+        eventType: { allowsGuests: false },
+      }),
+    ).toEqual([PUBLIC_ROW]);
   });
 
-  it("non-D&D: single MIXED RSVP and system host label; guests removable", () => {
-    const rows = rowSummary({
-      ...baseEvent,
-      gameSystem: "Daggerheart",
-      eventType: { allowsGuests: false },
-    });
-    expect(rows[0]).toEqual([
-      ["rsvp:evt1:MIXED", "RSVP", 3],
-      ["host:evt1", "GM Signup", 2],
-      ["assignment:evt1", "My Assignment", 2],
-    ]);
-    expect(rows[1]).toHaveLength(3);
-  });
-
-  it("missing eventType keeps the guest button", () => {
-    const rows = rowSummary({ ...baseEvent, eventType: null });
-    expect(rows[0].map((b: any) => b[0])).toContain("guest:evt1");
-  });
-
-  it("cancelled events render no rows", () => {
+  it("cancelled and completed events render no rows", () => {
     expect(eventButtons({ ...baseEvent, status: "CANCELLED" })).toEqual([]);
+    expect(eventButtons({ ...baseEvent, status: "COMPLETED" })).toEqual([]);
+  });
+
+  it("locked events keep only My signup", () => {
+    expect(rowSummary({ ...baseEvent, status: "LOCKED" })).toEqual([
+      [["my_signup:evt1", "My signup", 2]],
+    ]);
   });
 });
 
