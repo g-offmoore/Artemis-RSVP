@@ -173,7 +173,10 @@ export class EventsService {
     return event;
   }
 
-  async create(raw: unknown) {
+  // `options.occurrenceKey` is internal: only series generation sets it (F03).
+  // A duplicate (seriesId, occurrenceKey) fails inside the transaction, before
+  // any message jobs, roles, or Discord side effects are created.
+  async create(raw: unknown, options: { occurrenceKey?: string } = {}) {
     const input = eventCreateSchema.parse(raw);
     if (input.endAt <= input.startAt)
       throw new BadRequestException("endAt must be after startAt");
@@ -220,6 +223,7 @@ export class EventsService {
           shortageAlertHoursBefore: input.shortageAlertHoursBefore ?? null,
           createdByDiscordId: input.createdByDiscordId,
           ...(input.seriesId ? { seriesId: input.seriesId } : {}),
+          ...(input.seriesId && options.occurrenceKey ? { occurrenceKey: options.occurrenceKey } : {}),
           auditLogs: {
             create: {
               guildId: input.guildId,

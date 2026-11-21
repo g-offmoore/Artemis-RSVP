@@ -86,7 +86,8 @@ function makePrismaMock(overrides: Record<string, unknown> = {}) {
         findFirst: vi.fn(),
       },
       event: {
-        findFirst: vi.fn().mockResolvedValue(null), // no duplicate by default
+        findFirst: vi.fn().mockResolvedValue(null), // no prior slots by default
+        findUnique: vi.fn().mockResolvedValue(null), // slot not taken by default
       },
       ...overrides,
     },
@@ -194,5 +195,120 @@ describe("EventSeriesService.generate integration (mocked)", () => {
       timeZone: "America/New_York", hour: "numeric", hourCycle: "h23",
     }).format(startAt);
     expect(hourInEastern).toBe("18");
+  });
+});
+
+// ─── F03: occurrence identity and concurrency ────────────────────────────────
+
+describe("EventSeriesService.generate occurrence identity (F03)", () => {
+  const seriesRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "s1",
+    guildId: "g1",
+    recurrenceRule: "WEEKLY:FRI",
+    recurrenceAnchorAt: null,
+    defaultStartHour: 18,
+    defaultStartMinute: 0,
+    defaultDurationMinutes: 240,
+    defaultChannelId: "ch1",
+    defaultGameSystem: "D&D",
+    defaultTitle: "Test",
+    defaultDescription: null,
+    defaultImageUrl: null,
+    shortageAlertHoursBefore: null,
+    signupOpenHoursBefore: 168,
+    signupCloseHoursBefore: 1,
+    name: "Test",
+    createdByDiscordId: "u1",
+    eventType: { name: "Default" },
+    ...overrides,
+  });
+
+  function setup(opts: { latestKey?: string; series?: Record<string, unknown> } = {}) {
+    const prisma = makePrismaMock({
+      eventSeries: {
+        findUnique: vi.fn().mockResolvedValue(seriesRow(opts.series)),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      seriesGenerationRequest: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn(),
+        update: vi.fn().mockResolvedValue({}),
+        delete: vi.fn().mockResolvedValue({}),
+      },
+    });
+    (prisma.client.event.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      opts.latestKey ? { occurrenceKey: opts.latestKey } : null,
+    );
+    const creates: Array<{ startAt: string; key?: string }> = [];
+    const eventsService = {
+      create: vi.fn().mockImplementation((args: { startAt: string }, o: { occurrenceKey?: string }) => {
+        creates.push({ startAt: args.startAt, key: o?.occurrenceKey });
+        return { id: `ev-${creates.length}`, startAt: new Date(args.startAt) };
+      }),
+    };
+    return { prisma, eventsService, creates };
+  }
+
+  it("continues after the latest slot key, including cancelled tombstones", async () => {
+    const { EventSeriesService } = await import("./event-series.service.js");
+    // 2026-12-04 is a Friday; it may be cancelled or moved, its slot stays taken.
+    const { prisma, eventsService, creates } = setup({ latestKey: "2026-12-04" });
+    const svc = new EventSeriesService(prisma as any, eventsService as any);
+    const result = await svc.generate("s1", { count: 2 });
+    expect(result.created).toBe(2);
+    expect(creates.map((c) => c.key)).toEqual(["2026-12-11", "2026-12-18"]);
+  });
+
+  it("reports a slot created by a concurrent request instead of creating the next one", async () => {
+    const { EventSeriesService } = await import("./event-series.service.js");
+    const { prisma, eventsService, creates } = setup({ latestKey: "2026-12-04" });
+    eventsService.create.mockRejectedValueOnce(Object.assign(new Error("Unique constraint"), { code: "P2002" }));
+    (prisma.client.event.findUnique as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(null) // pre-check: free
+      .mockResolvedValueOnce({ id: "winner", startAt: new Date("2026-12-11T23:00:00Z") }); // after conflict
+    const svc = new EventSeriesService(prisma as any, eventsService as any);
+    const result = await svc.generate("s1", { count: 1 });
+    expect(result.created).toBe(0);
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "winner", occurrenceKey: "2026-12-11", existing: true }),
+    ]);
+    expect(creates).toHaveLength(0);
+  });
+
+  it("returns the stored batch when a request is retried with the same requestId", async () => {
+    const { EventSeriesService } = await import("./event-series.service.js");
+    const { prisma, eventsService } = setup();
+    const stored = { created: 1, events: [{ id: "ev-1", startAt: "2026-12-11T23:00:00.000Z", occurrenceKey: "2026-12-11", existing: false }] };
+    (prisma.client as any).seriesGenerationRequest.create.mockRejectedValue(Object.assign(new Error("dup"), { code: "P2002" }));
+    (prisma.client as any).seriesGenerationRequest.findUnique.mockResolvedValue({ result: stored });
+    const svc = new EventSeriesService(prisma as any, eventsService as any);
+    await expect(svc.generate("s1", { count: 1, requestId: "req-12345678" })).resolves.toEqual(stored);
+    expect(eventsService.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a duplicate requestId that is still in progress", async () => {
+    const { EventSeriesService } = await import("./event-series.service.js");
+    const { ConflictException } = await import("@nestjs/common");
+    const { prisma, eventsService } = setup();
+    (prisma.client as any).seriesGenerationRequest.create.mockRejectedValue(Object.assign(new Error("dup"), { code: "P2002" }));
+    (prisma.client as any).seriesGenerationRequest.findUnique.mockResolvedValue({ result: null });
+    const svc = new EventSeriesService(prisma as any, eventsService as any);
+    await expect(svc.generate("s1", { count: 1, requestId: "req-12345678" })).rejects.toThrow(ConflictException);
+  });
+
+  it("sets the biweekly anchor only if no other request set it first", async () => {
+    const { EventSeriesService } = await import("./event-series.service.js");
+    const winnerAnchor = makeDateInTimezone(2026, 12, 11, 18, 0, "America/New_York");
+    const { prisma, eventsService, creates } = setup({ latestKey: "2026-12-04", series: { recurrenceRule: "WEEKLY:FRI:2" } });
+    (prisma.client.eventSeries.findUnique as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ id: "s1" }) // existence check
+      .mockResolvedValueOnce(seriesRow({ recurrenceRule: "WEEKLY:FRI:2" })) // batch load
+      .mockResolvedValueOnce({ recurrenceAnchorAt: winnerAnchor }); // reread after conditional write
+    const svc = new EventSeriesService(prisma as any, eventsService as any);
+    await svc.generate("s1", { count: 2 });
+    expect((prisma.client.eventSeries as any).updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "s1", recurrenceAnchorAt: null } }),
+    );
+    expect(creates.map((c) => c.key)).toEqual(["2026-12-11", "2026-12-25"]);
   });
 });

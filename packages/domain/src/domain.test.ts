@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   assignParticipantsToTables,
   computeAssignmentLockScheduledFor,
+  cursorAfterOccurrenceKey,
+  occurrenceKeyFor,
+  parseOccurrenceKey,
   effectiveAssignmentLockOffsetMinutes,
   calendarDaysBetweenInTimezone,
   checkEligibility,
@@ -503,5 +506,31 @@ describe("assignment lock policy (F01)", () => {
   it("rejects negative or fractional overrides", () => {
     expect(() => effectiveAssignmentLockOffsetMinutes(-5)).toThrow();
     expect(() => effectiveAssignmentLockOffsetMinutes(1.5)).toThrow();
+  });
+});
+
+describe("series occurrence keys (F03)", () => {
+  it("uses the local calendar date in the series timezone", () => {
+    // 02:30 UTC on Dec 5 is still Dec 4 in New York.
+    expect(occurrenceKeyFor(new Date("2026-12-05T02:30:00Z"), "America/New_York")).toBe("2026-12-04");
+    expect(occurrenceKeyFor(new Date("2026-12-05T02:30:00Z"), "UTC")).toBe("2026-12-05");
+  });
+
+  it("puts the cursor on the slot's local day so the next weekday is strictly after it", () => {
+    const tz = "America/New_York";
+    const cursor = cursorAfterOccurrenceKey("2026-11-06", tz); // a Friday, DST ended Nov 1
+    expect(occurrenceKeyFor(cursor, tz)).toBe("2026-11-06");
+    const next = nextWeekdayDateInTimezone(cursor, 5, tz);
+    expect(occurrenceKeyFor(next, tz)).toBe("2026-11-13");
+  });
+
+  it("stays on the right day across a DST change", () => {
+    const tz = "America/New_York";
+    const cursor = cursorAfterOccurrenceKey("2026-10-30", tz); // Friday before DST ends
+    expect(occurrenceKeyFor(nextWeekdayDateInTimezone(cursor, 5, tz), tz)).toBe("2026-11-06");
+  });
+
+  it("rejects malformed keys", () => {
+    expect(() => parseOccurrenceKey("2026-1-5")).toThrow();
   });
 });

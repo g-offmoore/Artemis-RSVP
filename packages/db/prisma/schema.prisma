@@ -262,10 +262,28 @@ model EventSeries {
   shortageAlertHoursBefore     Int?
   createdByDiscordId           String
   events                       Event[]
+  generationRequests           SeriesGenerationRequest[]
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
   @@index([guildId, eventTypeId])
+}
+
+// Idempotency record for one series generation request (F03). A retried
+// request with the same requestId returns the stored batch instead of
+// generating another one.
+model SeriesGenerationRequest {
+  id        String      @id @default(cuid())
+  seriesId  String
+  series    EventSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  requestId String
+  count     Int
+  // Null while the request is in progress.
+  result    Json?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([seriesId, requestId])
 }
 
 model Event {
@@ -275,6 +293,10 @@ model Event {
   eventType                   EventType            @relation(fields: [eventTypeId], references: [id])
   seriesId                    String?
   series                      EventSeries?         @relation(fields: [seriesId], references: [id])
+  // Stable original slot of a generated series occurrence: local date
+  // "YYYY-MM-DD" in the series timezone. Never changes on reschedule/cancel,
+  // so cancelled slots stay as tombstones. Null for one-off events.
+  occurrenceKey               String?
   title                       String
   description                 String?
   imageUrl                    String?
@@ -318,6 +340,7 @@ model Event {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
+  @@unique([seriesId, occurrenceKey])
   @@index([guildId, startAt])
   @@index([status, startAt])
 }

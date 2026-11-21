@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { CalendarPlus } from "lucide-react";
 import { ActionState, generateOccurrencesAction } from "../../actions";
 
@@ -12,10 +12,17 @@ export function GenerateOccurrencesForm({ seriesId }: { seriesId: string }) {
     initialState,
   );
   const [count, setCount] = useState(4);
+  // One idempotency key per intended request: a retried or double-submitted
+  // form returns the same batch. A new key is issued after each completed run.
+  // Issued on the client after mount (avoids an SSR/hydration mismatch).
+  const [requestId, setRequestId] = useState("");
+  useEffect(() => {
+    setRequestId(crypto.randomUUID());
+  }, [state]);
   const validationError = useMemo(() => {
     if (!Number.isInteger(count)) return "Use a whole number of events.";
     if (count < 1) return "Generate at least 1 event.";
-    if (count > 52) return "Maximum is 52 events at a time.";
+    if (count > 12) return "Maximum is 12 events at a time.";
     return "";
   }, [count]);
 
@@ -37,13 +44,14 @@ export function GenerateOccurrencesForm({ seriesId }: { seriesId: string }) {
       onSubmit={handleSubmit}
     >
       <input type="hidden" name="seriesId" value={seriesId} />
+      <input type="hidden" name="requestId" value={requestId} />
       <label>
         Generate next N events
         <input
           name="count"
           type="number"
           min={1}
-          max={52}
+          max={12}
           value={count}
           onChange={(event) => setCount(Number(event.target.value))}
           required

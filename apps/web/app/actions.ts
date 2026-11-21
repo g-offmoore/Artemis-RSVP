@@ -249,11 +249,21 @@ export async function generateOccurrencesAction(
   try {
     const result = await artemisApi<{ created: number; events: Array<{ id: string; startAt: string }> }>(
       `/api/v1/series/${seriesId}/generate`,
-      { method: "POST", guildId: session.activeGuildId, body: { count } },
+      {
+        method: "POST",
+        guildId: session.activeGuildId,
+        body: { count, ...(valueOf(formData, "requestId") ? { requestId: valueOf(formData, "requestId") } : {}) },
+      },
     );
     revalidatePath(`/series/${seriesId}`);
     revalidatePath("/");
-    return { ok: true, message: `Generated ${result.created} event(s).` };
+    const alreadyThere = result.events.length - result.created;
+    return {
+      ok: true,
+      message:
+        `Generated ${result.created} event(s).` +
+        (alreadyThere > 0 ? ` ${alreadyThere} slot(s) already existed and were not duplicated.` : ""),
+    };
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) };
   }

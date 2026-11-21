@@ -99,3 +99,44 @@ describe.skipIf(!url)("MessageJobsService claims against PostgreSQL", () => {
     expect(await service.claimDueJobs("w2", 10)).toHaveLength(0);
   });
 });
+
+describe.skipIf(!url)("Series occurrence uniqueness against PostgreSQL (F03)", () => {
+  let client: PrismaClient;
+  const guildId = `it-${randomUUID()}`;
+
+  beforeAll(() => {
+    client = createPrismaClient({ connectionString: url, max: 5 });
+  });
+
+  afterAll(async () => {
+    if (!client) return;
+    await client.event.deleteMany({ where: { guildId } });
+    await client.eventSeries.deleteMany({ where: { guildId } });
+    await client.eventType.deleteMany({ where: { guildId } });
+    await client.$disconnect();
+  });
+
+  it("allows only one event per series slot, even under concurrent inserts", async () => {
+    const eventType = await client.eventType.create({ data: { guildId, key: "it-series", name: "IT" } });
+    const series = await client.eventSeries.create({
+      data: {
+        guildId, eventTypeId: eventType.id, name: "IT series", defaultChannelId: "chan",
+        recurrenceRule: "WEEKLY:FRI", createdByDiscordId: "creator",
+      },
+    });
+    const insert = () =>
+      client.event.create({
+        data: {
+          guildId, eventTypeId: eventType.id, seriesId: series.id, occurrenceKey: "2030-01-04",
+          title: "Slot", gameSystem: "D&D", channelId: "chan",
+          startAt: new Date("2030-01-04T23:00:00Z"), endAt: new Date("2030-01-05T03:00:00Z"),
+          createdByDiscordId: "creator",
+        },
+      });
+    const results = await Promise.allSettled([insert(), insert(), insert()]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of results) {
+      if (r.status === "rejected") expect((r.reason as { code?: string }).code).toBe("P2002");
+    }
+  });
+});

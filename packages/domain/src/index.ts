@@ -365,6 +365,9 @@ export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateSchema>;
 
 export const seriesGenerateSchema = z.object({
   count: z.coerce.number().int().min(1).max(12).default(4),
+  // Optional client-generated idempotency key. Retrying a request with the same
+  // requestId returns the original batch instead of generating a new one.
+  requestId: z.string().trim().min(8).max(100).optional(),
 });
 export type SeriesGenerateInput = z.infer<typeof seriesGenerateSchema>;
 
@@ -1198,4 +1201,35 @@ export function nextDeliveryState(
     nextAttemptAt: new Date(now.getTime() + delay),
     lastError: classified.message,
   };
+}
+
+// ─── Series occurrence identity (F03) ────────────────────────────────────
+// Each generated occurrence carries a stable slot key: the local calendar date
+// ("YYYY-MM-DD") of its original slot in the series timezone. The key never
+// changes when the occurrence is moved or cancelled, so a cancelled slot is a
+// tombstone that is never regenerated, and (seriesId, occurrenceKey) is unique.
+
+export function occurrenceKeyFor(date: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+export function parseOccurrenceKey(key: string): { year: number; month: number; day: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!m) throw new Error(`Invalid occurrence key: ${key}`);
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}
+
+// Generation cursor positioned on the slot's local date (noon, so DST shifts
+// never move it to a neighboring day). nextWeekdayDateInTimezone is exclusive,
+// so the next candidate is strictly after this slot.
+export function cursorAfterOccurrenceKey(key: string, tz: string): Date {
+  const { year, month, day } = parseOccurrenceKey(key);
+  return makeDateInTimezone(year, month, day, 12, 0, tz);
 }
