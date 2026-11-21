@@ -18,6 +18,7 @@ import {
   type AssignmentResult,
   type EligibilityRuleInput,
   type SignupRole,
+  assignmentDeliveryKey,
 } from "@artemis/domain";
 import { z } from "zod";
 import { AlertService } from "../common/alert.service.js";
@@ -240,6 +241,7 @@ export class EventsService {
       endAt: event.endAt,
       createdByDiscordId: event.createdByDiscordId,
       shortageAlertHoursBefore: event.shortageAlertHoursBefore,
+      assignmentLockOffsetMinutes: event.assignmentLockOffsetMinutes,
     });
 
     // §12.7: Create the temporary Discord player role at event creation, not publish.
@@ -344,6 +346,7 @@ export class EventsService {
         endAt: event.endAt,
         createdByDiscordId: existing.createdByDiscordId,
         shortageAlertHoursBefore: event.shortageAlertHoursBefore,
+        assignmentLockOffsetMinutes: event.assignmentLockOffsetMinutes,
       });
     }
 
@@ -1188,6 +1191,45 @@ export class EventsService {
           where: { id: eventId },
           data: { assignmentLockedAt: lockedAt },
         });
+
+        // F02: enqueue per-recipient assignment notices in the same transaction
+        // as the committed lock, so a crash after commit cannot lose them and
+        // manual and scheduled locks share one path. One notice per Discord user
+        // per lock revision (dedupe across participant representations).
+        const participants = await tx.eventParticipant.findMany({
+          where: {
+            eventId,
+            participantType: "PRIMARY",
+            assignmentEligible: true,
+            discordUserId: { not: null },
+          },
+          select: {
+            discordUserId: true,
+            assignments: {
+              where: { status: { in: ["CONFIRMED_SEATED", "ASSIGNED"] } },
+              select: { id: true },
+            },
+          },
+        });
+        const byUser = new Map<string, boolean>();
+        for (const p of participants) {
+          if (!p.discordUserId) continue;
+          byUser.set(p.discordUserId, (byUser.get(p.discordUserId) ?? false) || p.assignments.length > 0);
+        }
+        if (byUser.size > 0) {
+          await tx.eventMessageJob.createMany({
+            data: [...byUser].map(([discordUserId, seated]) => ({
+              deliveryKey: assignmentDeliveryKey(eventId, lockedAt, discordUserId),
+              eventId,
+              messageType: seated ? ("ASSIGNMENT_SEATED" as const) : ("ASSIGNMENT_WAITLISTED" as const),
+              targetType: "USER" as const,
+              targetId: discordUserId,
+              scheduledFor: lockedAt,
+              status: "PENDING" as const,
+            })),
+            skipDuplicates: true,
+          });
+        }
       });
 
       // Post table roster to event thread after lock (fire-and-forget).

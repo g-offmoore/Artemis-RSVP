@@ -133,6 +133,9 @@ enum MessageTargetType {
 
 enum MessageJobStatus {
   PENDING
+  // Claimed by a worker under a lease (leaseOwner/leaseExpiresAt). An expired
+  // lease makes the row claimable again.
+  PROCESSING
   SENT
   FAILED
   SKIPPED
@@ -289,8 +292,9 @@ model Event {
   feedbackWindowHours         Int                  @default(72)
   assignmentNotifiedAt        DateTime?
   lockedAt                    DateTime?
-  // Assignment lock: T-{N} minutes before startAt, converted to confirmed
-  assignmentLockOffsetMinutes Int                  @default(120)
+  // Assignment lock override: T-{N} minutes before startAt. Null = canonical
+  // default (60, see computeAssignmentLockScheduledFor in @artemis/domain).
+  assignmentLockOffsetMinutes Int?
   assignmentLockedAt          DateTime?
   // Backup DM policy
   backupPullMode              BackupPullMode       @default(CONSENT_REQUIRED)
@@ -553,24 +557,36 @@ model EventRole {
 
 // Persistent scheduled message jobs with observable state.
 // Created on event create/update; updated (not duplicated) on reschedule.
+// Delivery is durable at-least-once with logical dedupe on deliveryKey (F02).
 model EventMessageJob {
-  id           String           @id @default(cuid())
-  eventId      String
-  event        Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  messageType  EventMessageType
-  targetType   MessageTargetType
-  targetId     String
-  scheduledFor DateTime
-  status       MessageJobStatus @default(PENDING)
-  sentAt       DateTime?
-  failedAt     DateTime?
-  lastError    String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id             String           @id @default(cuid())
+  eventId        String
+  event          Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  // Logical delivery identity. Legacy rows use "eventId:messageType:targetId";
+  // committed-revision deliveries embed their revision (see @artemis/domain).
+  deliveryKey    String           @unique
+  messageType    EventMessageType
+  targetType     MessageTargetType
+  targetId       String
+  scheduledFor   DateTime
+  status         MessageJobStatus @default(PENDING)
+  attempts       Int              @default(0)
+  maxAttempts    Int              @default(5)
+  // When set, the job is not due before this time (retry backoff / 429).
+  nextAttemptAt  DateTime?
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  remoteMessageId String?
+  sentAt         DateTime?
+  failedAt       DateTime?
+  lastError      String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
-  @@unique([eventId, messageType, targetId])
+  @@index([eventId, messageType, targetId])
   @@index([eventId, status])
   @@index([scheduledFor, status])
+  @@index([status, leaseExpiresAt])
 }
 
 // Per-event Discord role requirements for each signup role type.

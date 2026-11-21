@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MessageJobsService } from "./message-jobs.service.js";
+import { MessageJobsService, SkipDeliveryError } from "./message-jobs.service.js";
 
 function makePrismaStub() {
   const upsertCalls: Array<{ create: Record<string, unknown> }> = [];
@@ -64,5 +64,68 @@ describe("MessageJobsService.rescheduleEventMessages", () => {
     expect(calledTypes.sort()).toEqual(
       ["ASSIGNMENT_LOCK", "CUSTOM", "POST_EVENT", "PREFLIGHT", "PRE_EVENT", "REMINDER"].sort(),
     );
+  });
+});
+
+describe("MessageJobsService.processDueJobs (F02)", () => {
+  function makeService(claimed: Array<Record<string, unknown>>) {
+    const updates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }> = [];
+    const prisma = {
+      client: {
+        $queryRaw: vi.fn().mockResolvedValue(claimed),
+        eventMessageJob: {
+          updateMany: vi.fn().mockImplementation((args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+            updates.push(args);
+            return Promise.resolve({ count: 1 });
+          }),
+        },
+      },
+    };
+    return { service: new MessageJobsService(prisma as never), updates };
+  }
+
+  const job = (id: string, attempts = 1) => ({
+    id, eventId: "evt-1", messageType: "ASSIGNMENT_SEATED", targetId: "u1",
+    deliveryKey: `evt-1:ASSIGNMENT:1:${id}`, attempts, maxAttempts: 5,
+  });
+
+  it("marks sent under the worker's lease and stores the remote message id", async () => {
+    const { service, updates } = makeService([job("j1")]);
+    const res = await service.processDueJobs(async () => ({ remoteMessageId: "m1" }), "lease-a");
+    expect(res).toMatchObject({ processed: 1, failed: 0, retried: 0, skipped: 0 });
+    expect(updates[0].where).toEqual({ id: "j1", leaseOwner: "lease-a" });
+    expect(updates[0].data).toMatchObject({ status: "SENT", remoteMessageId: "m1", leaseOwner: null });
+  });
+
+  it("re-queues retryable failures with a backoff instead of failing them", async () => {
+    const { service, updates } = makeService([job("j1")]);
+    const res = await service.processDueJobs(async () => { throw new Error("fetch failed"); }, "lease-a");
+    expect(res.retried).toBe(1);
+    expect(updates[0].data.status).toBe("PENDING");
+    expect(updates[0].data.nextAttemptAt).toBeInstanceOf(Date);
+  });
+
+  it("fails terminal errors without retrying", async () => {
+    const { service, updates } = makeService([job("j1")]);
+    const res = await service.processDueJobs(async () => {
+      throw new Error('Discord API 403 (/x): {"code":50007}');
+    }, "lease-a");
+    expect(res.failed).toBe(1);
+    expect(updates[0].data.status).toBe("FAILED");
+  });
+
+  it("fails after the final attempt", async () => {
+    const { service, updates } = makeService([job("j1", 5)]);
+    await service.processDueJobs(async () => { throw new Error("fetch failed"); }, "lease-a");
+    expect(updates[0].data.status).toBe("FAILED");
+  });
+
+  it("skips deliveries the dispatcher rejects as stale", async () => {
+    const { service, updates } = makeService([job("j1")]);
+    const res = await service.processDueJobs(async () => {
+      throw new SkipDeliveryError("Event was cancelled");
+    }, "lease-a");
+    expect(res.skipped).toBe(1);
+    expect(updates[0].data).toMatchObject({ status: "SKIPPED", lastError: "Event was cancelled" });
   });
 });

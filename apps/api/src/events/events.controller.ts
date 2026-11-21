@@ -158,6 +158,12 @@ export class EventsController {
     return this.messageJobs.listForEvent(id);
   }
 
+  // Staff retry of one FAILED or SKIPPED delivery for this event (F02).
+  @Post(":id/message-jobs/:jobId/retry")
+  retryMessageJob(@Param("id") id: string, @Param("jobId") jobId: string) {
+    return this.messageJobs.retryJob(id, jobId);
+  }
+
   // Audit log for a specific event (ops/admin: who changed what, when).
   @Get(":id/audit-logs")
   auditLogs(@Param("id") id: string) {
