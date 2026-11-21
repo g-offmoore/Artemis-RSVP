@@ -129,3 +129,14 @@ describe("MessageJobsService.processDueJobs (F02)", () => {
     expect(updates[0].data).toMatchObject({ status: "SKIPPED", lastError: "Event was cancelled" });
   });
 });
+
+describe("MessageJobsService.processDueJobs without Discord (F04)", () => {
+  it("claims only assignment locks when lockOnly is set", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    const service = new MessageJobsService({ client: { $queryRaw: queryRaw } } as never);
+    await service.processDueJobs(async () => undefined, "lease-a", { lockOnly: true });
+    const [strings, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    expect(strings.join("?")).toContain("'ASSIGNMENT_LOCK'");
+    expect(values).toContain(true);
+  });
+});

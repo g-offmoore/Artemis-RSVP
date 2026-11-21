@@ -1233,3 +1233,13 @@ export function cursorAfterOccurrenceKey(key: string, tz: string): Date {
   const { year, month, day } = parseOccurrenceKey(key);
   return makeDateInTimezone(year, month, day, 12, 0, tz);
 }
+
+// True when a Discord REST error means the target object no longer exists
+// (HTTP 404, or Unknown Role/Member/Channel/Message codes). Used so cleanup
+// treats "already gone" as success while permission errors stay failures.
+export function isDiscordNotFound(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/Discord API 404\b/.test(raw)) return true;
+  const code = Number(/"code"\s*:\s*(\d+)/.exec(raw)?.[1] ?? NaN);
+  return [10003, 10007, 10008, 10011, 10013].includes(code);
+}

@@ -178,6 +178,26 @@ export class EventsController {
     return this.discordRole.retryEventRole(id);
   }
 
+  // ─── Discord reconciliation (F04, staff) ─────────────────────────────────
+
+  // Post, thread, role and per-user membership sync state for one event.
+  @Get(":id/discord/status")
+  discordStatus(@Param("id") id: string) {
+    return this.discordRole.eventDiscordStatus(id);
+  }
+
+  // Retry private thread creation; resets the automatic retry budget.
+  @Post(":id/thread/retry")
+  retryEventThread(@Param("id") id: string) {
+    return this.discordRole.retryEventThread(id);
+  }
+
+  // Recompute who should have role/thread access and re-apply it for everyone.
+  @Post(":id/discord/memberships/repair")
+  repairMemberships(@Param("id") id: string) {
+    return this.discordRole.repairEventMemberships(id);
+  }
+
   // ─── Backup DM candidates ─────────────────────────────────────────────────
 
   @Get(":id/backup-dm/candidates")

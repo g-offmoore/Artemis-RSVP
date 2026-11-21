@@ -311,6 +311,9 @@ model Event {
   roleCleanupAt               DateTime?
   discordThreadId             String?
   threadRetryCount            Int                  @default(0)
+  // Short publish lease (F04): serializes Discord post creation so concurrent
+  // publishes cannot each create a public message.
+  publishLockUntil            DateTime?
   feedbackWindowHours         Int                  @default(72)
   assignmentNotifiedAt        DateTime?
   lockedAt                    DateTime?
@@ -336,6 +339,7 @@ model Event {
   messageJobs                 EventMessageJob[]
   eligibilityRules            EventEligibilityRule[]
   seatingGroups               EventSeatingGroup[]
+  discordMemberships          EventDiscordMembership[]
   signupPreferences           EventSignupPreference[]
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
@@ -573,9 +577,45 @@ model EventRole {
   failedAt      DateTime?     // set when Discord role creation failed
   lastError     String?       // last Discord API error message
   retryCount    Int           @default(0)   // auto-retry attempts made so far
+  // Cleanup (F04): deletedAt is set only after Discord confirms the DELETE (or
+  // reports the role already gone). Failed deletes record the error and wait
+  // until cleanupNextAttemptAt before trying again.
+  cleanupAttempts      Int       @default(0)
+  cleanupNextAttemptAt DateTime?
 
   @@unique([eventId, roleType])
   @@unique([discordRoleId])   // NULL values are not constrained (PostgreSQL semantics)
+}
+
+enum DiscordSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+// Desired vs applied Discord access for one user on one event (F04): the
+// temporary player role and the private event thread. `desired` is recomputed
+// from canonical state (active RSVP or hosting a table); a reconciler applies
+// it and retries failures. Guests without a Discord account have no row;
+// Discord-linked guests are not granted access.
+model EventDiscordMembership {
+  id            String            @id @default(cuid())
+  eventId       String
+  event         Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  discordUserId String
+  desired       Boolean
+  status        DiscordSyncStatus @default(PENDING)
+  roleApplied   Boolean           @default(false)
+  threadApplied Boolean           @default(false)
+  attempts      Int               @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  nextAttemptAt DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([eventId, discordUserId])
+  @@index([status, nextAttemptAt])
 }
 
 // Persistent scheduled message jobs with observable state.

@@ -283,10 +283,13 @@ export class MessageJobsService {
   // SKIP LOCKED keeps concurrent workers from claiming the same row, and rows
   // whose lease expired (a worker crashed mid-dispatch) become claimable again.
   // ASSIGNMENT_LOCK is ordered first so optional messaging cannot starve it.
+  // With lockOnly, only ASSIGNMENT_LOCK jobs are claimed (used when Discord is
+  // unavailable, so messages are not burned through their retry budget).
   async claimDueJobs(
     leaseOwner: string,
     limit = 50,
     leaseMs: number = DELIVERY_DEFAULTS.leaseMs,
+    lockOnly = false,
   ): Promise<ClaimedJob[]> {
     const leaseSeconds = Math.ceil(leaseMs / 1000);
     return this.prisma.client.$queryRaw<ClaimedJob[]>`
@@ -298,8 +301,9 @@ export class MessageJobsService {
           "updatedAt" = now()
       WHERE j."id" IN (
         SELECT c."id" FROM "EventMessageJob" AS c
-        WHERE (c."status" = 'PENDING' AND COALESCE(c."nextAttemptAt", c."scheduledFor") <= now())
-           OR (c."status" = 'PROCESSING' AND c."leaseExpiresAt" < now())
+        WHERE ((c."status" = 'PENDING' AND COALESCE(c."nextAttemptAt", c."scheduledFor") <= now())
+           OR (c."status" = 'PROCESSING' AND c."leaseExpiresAt" < now()))
+          AND (${lockOnly} = false OR c."messageType" = 'ASSIGNMENT_LOCK')
         ORDER BY (c."messageType" = 'ASSIGNMENT_LOCK') DESC,
                  COALESCE(c."nextAttemptAt", c."scheduledFor") ASC
         LIMIT ${limit}
@@ -314,8 +318,9 @@ export class MessageJobsService {
   async processDueJobs(
     sender: (job: ClaimedJob) => Promise<void | { remoteMessageId?: string }>,
     leaseOwner: string = `worker-${randomUUID()}`,
+    options: { lockOnly?: boolean } = {},
   ): Promise<{ processed: number; failed: number; retried: number; skipped: number }> {
-    const due = await this.claimDueJobs(leaseOwner);
+    const due = await this.claimDueJobs(leaseOwner, 50, DELIVERY_DEFAULTS.leaseMs, options.lockOnly ?? false);
 
     let processed = 0;
     let failed = 0;

@@ -15,6 +15,72 @@ export type ActionState = {
 };
 
 const emptyState: ActionState = { ok: false, message: "" };
+
+// ─── Discord sync repair (F04, staff) ─────────────────────────────────────
+
+export async function retryEventThreadAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+  try {
+    const result = await artemisApi<{ ok: boolean; discordThreadId?: string; error?: string }>(
+      `/api/v1/events/${eventId}/thread/retry`,
+      { method: "POST", guildId: session.activeGuildId },
+    );
+    revalidatePath(`/events/${eventId}`);
+    return result.ok
+      ? { ok: true, message: "Event thread is ready. Members are being added." }
+      : { ok: false, message: result.error ?? "Thread creation failed." };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
+export async function repairMembershipsAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+  try {
+    const result = await artemisApi<{ queued: number }>(
+      `/api/v1/events/${eventId}/discord/memberships/repair`,
+      { method: "POST", guildId: session.activeGuildId },
+    );
+    revalidatePath(`/events/${eventId}`);
+    return {
+      ok: true,
+      message: `Re-checking access for ${result.queued} member(s). Changes apply within a minute.`,
+    };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
+export async function retryMessageJobAction(
+  _state: ActionState = emptyState,
+  formData: FormData,
+): Promise<ActionState> {
+  const session = await requireSession();
+  const eventId = valueOf(formData, "eventId");
+  const jobId = valueOf(formData, "jobId");
+  try {
+    const result = await artemisApi<{ ok: boolean }>(
+      `/api/v1/events/${eventId}/message-jobs/${jobId}/retry`,
+      { method: "POST", guildId: session.activeGuildId },
+    );
+    revalidatePath(`/events/${eventId}`);
+    revalidatePath("/discord-sync");
+    return result.ok
+      ? { ok: true, message: "Queued to send again within a minute." }
+      : { ok: false, message: "That message is no longer in a failed state." };
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) };
+  }
+}
+
 const defaultEventTimeZone =
   process.env.ARTEMIS_EVENT_TIME_ZONE ?? "America/New_York";
 

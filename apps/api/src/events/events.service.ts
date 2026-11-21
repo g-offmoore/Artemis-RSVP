@@ -102,7 +102,14 @@ export class EventsService {
   async discordSyncFailures(guildId: string) {
     if (!guildId) throw new BadRequestException("guildId is required");
 
-    const [failedRoles, failedThreadEvents, failedMessageJobs, failedPostLogs] = await Promise.all([
+    const [
+      failedRoles,
+      failedThreadEvents,
+      failedMessageJobs,
+      failedPostLogs,
+      failedMemberships,
+      roleCleanupFailures,
+    ] = await Promise.all([
       this.prisma.client.eventRole.findMany({
         where: {
           discordRoleId: null,
@@ -136,9 +143,30 @@ export class EventsService {
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
+      // F04: users whose role/thread access could not be applied or removed.
+      this.prisma.client.eventDiscordMembership.findMany({
+        where: { status: "FAILED", event: { guildId } },
+        include: { event: { select: { id: true, title: true, startAt: true } } },
+        orderBy: { updatedAt: "desc" },
+        take: 50,
+      }),
+      // F04: expired roles Discord refused to delete (still present in the server).
+      this.prisma.client.eventRole.findMany({
+        where: { deletedAt: null, cleanupAttempts: { gt: 0 }, event: { guildId } },
+        include: { event: { select: { id: true, title: true, startAt: true } } },
+        orderBy: { expiresAt: "desc" },
+        take: 50,
+      }),
     ]);
 
-    return { failedRoles, failedThreadEvents, failedMessageJobs, failedPostLogs };
+    return {
+      failedRoles,
+      failedThreadEvents,
+      failedMessageJobs,
+      failedPostLogs,
+      failedMemberships,
+      roleCleanupFailures,
+    };
   }
 
   async auditLogs(eventId: string) {
@@ -632,24 +660,10 @@ export class EventsService {
       });
     });
 
-    // §12.7: Fire-and-forget Discord role assignment and thread membership — RSVP always succeeds.
-    void (async () => {
-      const [eventRole, eventWithThread] = await Promise.all([
-        this.prisma.client.eventRole.findUnique({
-          where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
-        }),
-        this.prisma.client.event.findUnique({
-          where: { id: eventId },
-          select: { discordThreadId: true },
-        }),
-      ]);
-      if (eventRole && eventRole.discordRoleId && !eventRole.deletedAt) {
-        await this.discordRole.assignRoleToMember(event.guildId, input.discordUserId, eventRole.discordRoleId);
-      }
-      if (eventWithThread?.discordThreadId) {
-        await this.discordRole.addMemberToThread(eventWithThread.discordThreadId, input.discordUserId);
-      }
-    })().catch((err) => this.logger.warn({ err }, "Could not assign event role/thread on RSVP"));
+    // §12.7 / F04: record desired Discord access (event role + private thread)
+    // and apply it in the background. Failures are tracked for retry and staff
+    // repair; the RSVP itself always succeeds.
+    void this.discordRole.syncMembership(eventId, input.discordUserId);
 
     return result;
   }
@@ -784,15 +798,9 @@ export class EventsService {
       },
     });
 
-    // §12.7: Fire-and-forget Discord role removal — cancel always succeeds regardless.
-    void (async () => {
-      const eventRole = await this.prisma.client.eventRole.findUnique({
-        where: { eventId_roleType: { eventId, roleType: "PLAYER" } },
-      });
-      if (eventRole && eventRole.discordRoleId && !eventRole.deletedAt) {
-        await this.discordRole.removeRoleFromMember(event.guildId, discordUserId, eventRole.discordRoleId);
-      }
-    })().catch((err) => this.logger.warn({ err }, "Could not remove event role on RSVP cancel"));
+    // §12.7 / F04: revoke Discord access unless the user still has another
+    // reason for it (for example hosting a table). Cancel always succeeds.
+    void this.discordRole.syncMembership(eventId, discordUserId);
 
     return rsvp;
   }
@@ -877,7 +885,7 @@ export class EventsService {
     // TODO(product-feedback): Capacity changes from table/DM signup should
     // refresh draft assignments before lock and trigger waitlist promotion,
     // user notifications, and Discord post refresh after committed assignments.
-    return this.prisma.client.$transaction(async (tx) => {
+    const savedTable = await this.prisma.client.$transaction(async (tx) => {
       const data = {
         title: input.title ?? `${ambassador.displayName}'s Table`,
         tableType,
@@ -910,6 +918,10 @@ export class EventsService {
 
       return table;
     });
+
+    // F04: table hosts get the event role and thread access too.
+    void this.discordRole.syncMembership(eventId, input.ambassadorDiscordId);
+    return savedTable;
   }
 
   // ─── Assignment ───────────────────────────────────────────────────────────

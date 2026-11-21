@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -52,6 +53,36 @@ export class DiscordEventPostService {
     });
     if (!event) throw new NotFoundException("Event not found");
 
+    // F04: serialize publication. Two concurrent publishes of an unposted event
+    // would otherwise each POST a public message and orphan one of them.
+    const now = new Date();
+    const lease = await this.prisma.client.event.updateMany({
+      where: {
+        id: eventId,
+        OR: [{ publishLockUntil: null }, { publishLockUntil: { lt: now } }],
+      },
+      data: { publishLockUntil: new Date(now.getTime() + PUBLISH_LEASE_MS) },
+    });
+    if (lease.count === 0) {
+      throw new ConflictException("This event is already being published; try again in a moment");
+    }
+
+    try {
+      return await this.publishUnderLease(event, eventId, actorDiscordId, token);
+    } finally {
+      await this.prisma.client.event
+        .update({ where: { id: eventId }, data: { publishLockUntil: null } })
+        .catch((err) => this.logger.warn({ err, eventId }, "Could not release publish lease"));
+    }
+  }
+
+  private async publishUnderLease(
+    event: Parameters<typeof eventEmbed>[0] &
+      Parameters<typeof eventButtons>[0] & { guildId: string; channelId: string; messageId: string | null },
+    eventId: string,
+    actorDiscordId: string,
+    token: string,
+  ) {
     const payload = {
       embeds: [eventEmbed(event)],
       components: eventButtons(event),
@@ -82,6 +113,11 @@ export class DiscordEventPostService {
         ));
 
       const messageId = stringField(message, "id");
+      if (!response) {
+        // Log the remote ID before persisting so an orphaned post can be found
+        // if the database write below fails.
+        this.logger.log({ eventId, channelId: event.channelId, messageId }, "Created Discord event post");
+      }
       await this.prisma.client.event.update({
         where: { id: eventId },
         data: {
@@ -120,6 +156,9 @@ export class DiscordEventPostService {
     }
   }
 }
+
+// Longer than one publish round trip; a crashed publisher's lease expires.
+const PUBLISH_LEASE_MS = 30_000;
 
 class DiscordApiError extends Error {
   constructor(

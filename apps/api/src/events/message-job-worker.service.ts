@@ -54,14 +54,18 @@ export class MessageJobWorkerService implements OnModuleInit {
   }
 
   private async runPoll() {
+    // F04: assignment locks are state changes, not Discord messages, so they
+    // run even without a bot token. Message deliveries wait (untouched, not
+    // failed) until a token is configured.
     const token = process.env.DISCORD_TOKEN;
     if (!token) {
-      this.logger.warn("DISCORD_TOKEN not set; skipping message job poll");
-      return;
+      this.logger.warn("DISCORD_TOKEN not set; processing assignment locks only, messages are waiting");
     }
 
     const { processed, failed, retried, skipped } = await this.messageJobs.processDueJobs(
-      (job) => this.dispatchJob(job, token),
+      (job) => this.dispatchJob(job, token ?? ""),
+      undefined,
+      { lockOnly: !token },
     );
 
     if (processed > 0 || failed > 0 || retried > 0 || skipped > 0) {
@@ -85,6 +89,17 @@ export class MessageJobWorkerService implements OnModuleInit {
     await this.discordRole.retryFailedRolesAndThreads().catch((err) => {
       this.logger.warn({ err }, "Failed during auto-retry of event roles/threads");
     });
+
+    // F04: converge role/thread membership to desired state (retries, removals
+    // after cancel, and backfill after a late role/thread creation).
+    await this.discordRole.reconcilePendingMemberships().then(
+      ({ synced, failed: membershipFailed }) => {
+        if (synced > 0 || membershipFailed > 0) {
+          this.logger.log(`Membership reconcile: synced=${synced} failed=${membershipFailed}`);
+        }
+      },
+      (err) => this.logger.warn({ err }, "Failed during Discord membership reconcile"),
+    );
   }
 
   private async dispatchJob(job: ClaimedJob, token: string): Promise<void | { remoteMessageId?: string }> {
@@ -97,6 +112,9 @@ export class MessageJobWorkerService implements OnModuleInit {
     });
     if (!current) throw new SkipDeliveryError("Event no longer exists");
     if (current.status === "CANCELLED") throw new SkipDeliveryError("Event was cancelled");
+    if (!token && job.messageType !== "ASSIGNMENT_LOCK") {
+      throw new Error("DISCORD_TOKEN not set; delivery will be retried");
+    }
 
     switch (job.messageType) {
       case "PRE_EVENT":
