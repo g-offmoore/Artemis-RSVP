@@ -158,6 +158,12 @@ export class EventsController {
     return this.messageJobs.listForEvent(id);
   }
 
+  // Staff retry of one FAILED or SKIPPED delivery for this event (F02).
+  @Post(":id/message-jobs/:jobId/retry")
+  retryMessageJob(@Param("id") id: string, @Param("jobId") jobId: string) {
+    return this.messageJobs.retryJob(id, jobId);
+  }
+
   // Audit log for a specific event (ops/admin: who changed what, when).
   @Get(":id/audit-logs")
   auditLogs(@Param("id") id: string) {
@@ -170,6 +176,26 @@ export class EventsController {
   @Post(":id/roles/retry")
   retryEventRole(@Param("id") id: string) {
     return this.discordRole.retryEventRole(id);
+  }
+
+  // ─── Discord reconciliation (F04, staff) ─────────────────────────────────
+
+  // Post, thread, role and per-user membership sync state for one event.
+  @Get(":id/discord/status")
+  discordStatus(@Param("id") id: string) {
+    return this.discordRole.eventDiscordStatus(id);
+  }
+
+  // Retry private thread creation; resets the automatic retry budget.
+  @Post(":id/thread/retry")
+  retryEventThread(@Param("id") id: string) {
+    return this.discordRole.retryEventThread(id);
+  }
+
+  // Recompute who should have role/thread access and re-apply it for everyone.
+  @Post(":id/discord/memberships/repair")
+  repairMemberships(@Param("id") id: string) {
+    return this.discordRole.repairEventMemberships(id);
   }
 
   // ─── Backup DM candidates ─────────────────────────────────────────────────

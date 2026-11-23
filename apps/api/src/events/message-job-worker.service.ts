@@ -1,8 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
-import { backupDmCustomId } from "@artemis/domain";
+import {
+  assignmentDeliveryKey,
+  backupDmCustomId,
+  computeAssignmentLockScheduledFor,
+  TerminalDeliveryError,
+} from "@artemis/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { JobsService } from "../jobs/jobs.service.js";
-import { MessageJobsService } from "./message-jobs.service.js";
+import { MessageJobsService, SkipDeliveryError, type ClaimedJob } from "./message-jobs.service.js";
 import { EventsService } from "./events.service.js";
 import { EventSeriesService } from "./event-series.service.js";
 import { DiscordRoleService } from "./discord-role.service.js";
@@ -49,20 +54,24 @@ export class MessageJobWorkerService implements OnModuleInit {
   }
 
   private async runPoll() {
+    // F04: assignment locks are state changes, not Discord messages, so they
+    // run even without a bot token. Message deliveries wait (untouched, not
+    // failed) until a token is configured.
     const token = process.env.DISCORD_TOKEN;
     if (!token) {
-      this.logger.warn("DISCORD_TOKEN not set; skipping message job poll");
-      return;
+      this.logger.warn("DISCORD_TOKEN not set; processing assignment locks only, messages are waiting");
     }
 
-    const { processed, failed } = await this.messageJobs.processDueJobs(
-      async (job) => {
-        await this.dispatchJob(job, token);
-      },
+    const { processed, failed, retried, skipped } = await this.messageJobs.processDueJobs(
+      (job) => this.dispatchJob(job, token ?? ""),
+      undefined,
+      { lockOnly: !token },
     );
 
-    if (processed > 0 || failed > 0) {
-      this.logger.log(`Message job poll: processed=${processed} failed=${failed}`);
+    if (processed > 0 || failed > 0 || retried > 0 || skipped > 0) {
+      this.logger.log(
+        `Message job poll: processed=${processed} failed=${failed} retried=${retried} skipped=${skipped}`,
+      );
     }
 
     // Auto-generate next series occurrence when the signup window for the
@@ -80,12 +89,33 @@ export class MessageJobWorkerService implements OnModuleInit {
     await this.discordRole.retryFailedRolesAndThreads().catch((err) => {
       this.logger.warn({ err }, "Failed during auto-retry of event roles/threads");
     });
+
+    // F04: converge role/thread membership to desired state (retries, removals
+    // after cancel, and backfill after a late role/thread creation).
+    await this.discordRole.reconcilePendingMemberships().then(
+      ({ synced, failed: membershipFailed }) => {
+        if (synced > 0 || membershipFailed > 0) {
+          this.logger.log(`Membership reconcile: synced=${synced} failed=${membershipFailed}`);
+        }
+      },
+      (err) => this.logger.warn({ err }, "Failed during Discord membership reconcile"),
+    );
   }
 
-  private async dispatchJob(
-    job: { id: string; messageType: string; targetId: string; eventId: string },
-    token: string,
-  ) {
+  private async dispatchJob(job: ClaimedJob, token: string): Promise<void | { remoteMessageId?: string }> {
+    // Revalidate lifecycle before every dispatch (F02): a job claimed after its
+    // event was cancelled must not go out, even if it was in flight when the
+    // cancellation's bulk update ran.
+    const current = await this.prisma.client.event.findUnique({
+      where: { id: job.eventId },
+      select: { status: true },
+    });
+    if (!current) throw new SkipDeliveryError("Event no longer exists");
+    if (current.status === "CANCELLED") throw new SkipDeliveryError("Event was cancelled");
+    if (!token && job.messageType !== "ASSIGNMENT_LOCK") {
+      throw new Error("DISCORD_TOKEN not set; delivery will be retried");
+    }
+
     switch (job.messageType) {
       case "PRE_EVENT":
       case "POST_EVENT":
@@ -114,11 +144,11 @@ export class MessageJobWorkerService implements OnModuleInit {
         break;
       case "ASSIGNMENT_SEATED":
       case "ASSIGNMENT_WAITLISTED":
-        // Per-participant assignment notifications created by runAssignmentLock.
-        await this.sendAssignmentNotification(job, token);
-        break;
+        // Per-recipient notices enqueued inside the lock transaction.
+        return this.sendAssignmentNotification(job, token);
       default:
-        this.logger.warn(`Unknown messageType ${job.messageType} for job ${job.id}`);
+        // Never mark an unknown job type as sent.
+        throw new TerminalDeliveryError(`Unknown messageType ${job.messageType} for job ${job.id}`);
     }
   }
 
@@ -206,7 +236,7 @@ export class MessageJobWorkerService implements OnModuleInit {
     const guestParticipants = event.participants.filter((p) => p.participantType === "GUEST");
     const guestWaitlisted = guestParticipants.filter((p) => !seatedIds.has(p.id)).length;
 
-    const lockAt = new Date(event.startAt.getTime() - 60 * 60 * 1000);
+    const lockAt = computeAssignmentLockScheduledFor(event.startAt, event.assignmentLockOffsetMinutes);
     const lockTs = discordTs(lockAt, "R");
 
     const content =
@@ -279,8 +309,7 @@ export class MessageJobWorkerService implements OnModuleInit {
     // Backup DM candidates available.
     const backupCount = event.rsvps.length;
 
-    // Assignment lock is 1h before start (T-1h = assignmentLockOffsetMs).
-    const lockAt = new Date(event.startAt.getTime() - 60 * 60 * 1000);
+    const lockAt = computeAssignmentLockScheduledFor(event.startAt, event.assignmentLockOffsetMinutes);
     const lockTs = discordTs(lockAt, "R");
 
     const trackLines = (Object.entries(byTrack) as Array<[string, { seated: number; waitlisted: number }]>)
@@ -326,59 +355,18 @@ export class MessageJobWorkerService implements OnModuleInit {
       }
       throw err;
     }
-
-    // Schedule durable per-participant assignment DMs via EventMessageJob so
-    // each can be retried independently if Discord is temporarily unavailable.
-    await this.scheduleAssignmentNotifications(job.eventId);
+    // Per-recipient assignment notices are enqueued by lockAssignments in the
+    // same transaction as the lock, so a retry of this job never loses them.
   }
 
   // Creates durable EventMessageJob entries for each eligible participant after
   // assignment lock. The unique constraint on (eventId, messageType, targetId)
   // makes this idempotent — calling twice does not duplicate jobs.
-  private async scheduleAssignmentNotifications(eventId: string) {
-    const event = await this.prisma.client.event.findUnique({
-      where: { id: eventId },
-      include: {
-        participants: {
-          where: { assignmentEligible: true, participantType: "PRIMARY" },
-          include: {
-            assignments: {
-              where: { status: { in: ["CONFIRMED_SEATED", "ASSIGNED"] } },
-              select: { eventTableId: true },
-            },
-          },
-        },
-      },
-    });
-    if (!event) return;
-
-    const now = new Date();
-    const notifiable = event.participants.filter(
-      (p): p is typeof p & { discordUserId: string } => typeof p.discordUserId === "string",
-    );
-
-    await Promise.allSettled(
-      notifiable.map((p) => {
-        const isSeated = p.assignments.length > 0;
-        const messageType = isSeated ? "ASSIGNMENT_SEATED" : "ASSIGNMENT_WAITLISTED";
-        return this.messageJobs.scheduleJob({
-          eventId,
-          messageType,
-          targetType: "USER",
-          targetId: p.discordUserId,
-          scheduledFor: now,
-        });
-      }),
-    );
-
-    this.logger.log(`Scheduled ${notifiable.length} assignment notification job(s) for event ${eventId}`);
-  }
-
   // Sends a single assignment notification DM for ASSIGNMENT_SEATED/WAITLISTED jobs.
   private async sendAssignmentNotification(
-    job: { id: string; eventId: string; targetId: string; messageType: string },
+    job: ClaimedJob,
     token: string,
-  ) {
+  ): Promise<{ remoteMessageId?: string }> {
     const event = await this.prisma.client.event.findUnique({
       where: { id: job.eventId },
       include: {
@@ -394,15 +382,29 @@ export class MessageJobWorkerService implements OnModuleInit {
         },
       },
     });
-    if (!event) throw new Error(`Event ${job.eventId} not found`);
+    if (!event) throw new SkipDeliveryError(`Event ${job.eventId} not found`);
+
+    // Only send notices for the current committed lock revision. Legacy keys
+    // (pre-F02) carry no revision and are accepted as-is.
+    if (job.deliveryKey.includes(":ASSIGNMENT:")) {
+      if (
+        !event.assignmentLockedAt ||
+        assignmentDeliveryKey(event.id, event.assignmentLockedAt, job.targetId) !== job.deliveryKey
+      ) {
+        throw new SkipDeliveryError("Assignment revision superseded");
+      }
+    }
 
     const participant = event.participants[0];
+    if (!participant) throw new SkipDeliveryError("Recipient is no longer a participant");
+    // Content follows the committed state at send time, not the type chosen at
+    // enqueue time, so a later committed promotion is reported correctly.
     const tableById = new Map(event.tables.map((t) => [t.id, t]));
     const startTs = discordTs(event.startAt, "F");
     const relTs = discordTs(event.startAt, "R");
 
     let content: string;
-    if (job.messageType === "ASSIGNMENT_SEATED" && participant?.assignments[0]?.eventTableId) {
+    if (participant.assignments[0]?.eventTableId) {
       const table = tableById.get(participant.assignments[0].eventTableId);
       const dmLine = table?.ambassadorProfile?.displayName
         ? ` (DM: **${table.ambassadorProfile.displayName}**)`
@@ -420,8 +422,9 @@ export class MessageJobWorkerService implements OnModuleInit {
         `You may still be seated if another player cancels before the event starts.`;
     }
 
-    await discordDmPost(token, job.targetId, { content });
+    const remoteMessageId = await discordDmPost(token, job.targetId, { content, allowed_mentions: { parse: [] } });
     this.logger.log(`Sent assignment notification (${job.messageType}) to ${job.targetId} for event ${job.eventId}`);
+    return { remoteMessageId };
   }
 
   // ─── Auto-generate series occurrences ────────────────────────────────────
@@ -663,7 +666,8 @@ async function discordDmPost(
   const dmChannel = await discordPost(token, "/users/@me/channels", {
     recipient_id: userId,
   }) as { id: string };
-  await discordPost(token, `/channels/${dmChannel.id}/messages`, body);
+  const message = await discordPost(token, `/channels/${dmChannel.id}/messages`, body) as { id?: string };
+  return message.id;
 }
 
 async function discordPost(

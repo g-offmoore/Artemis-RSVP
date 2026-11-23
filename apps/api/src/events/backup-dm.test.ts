@@ -75,6 +75,7 @@ describe("EventsService backup DM state transitions", () => {
         ensureEventThread: vi.fn().mockResolvedValue({ ok: true, discordThreadId: "t1" }),
         assignRoleToMember: vi.fn(),
         addMemberToThread: vi.fn(),
+        syncMembership: vi.fn(),
         postToThread: vi.fn(),
       } as any,
     );
@@ -102,6 +103,7 @@ describe("EventsService backup DM state transitions", () => {
         ensureEventThread: vi.fn().mockResolvedValue({ ok: true, discordThreadId: "t1" }),
         assignRoleToMember: vi.fn(),
         addMemberToThread: vi.fn(),
+        syncMembership: vi.fn(),
         postToThread: vi.fn(),
       } as any,
     );
@@ -144,7 +146,8 @@ describe("EventsService backup DM state transitions", () => {
       { sendOpsAlert: vi.fn() } as any,
       { scheduleEventMessages: vi.fn(), rescheduleEventMessages: vi.fn() } as any,
       { ensureEventRole: vi.fn(), ensureEventThread: vi.fn(), assignRoleToMember: vi.fn(),
-        addMemberToThread: vi.fn(), postToThread: vi.fn() } as any,
+        addMemberToThread: vi.fn(),
+        syncMembership: vi.fn(), postToThread: vi.fn() } as any,
     );
 
     await expect(

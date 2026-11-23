@@ -9,6 +9,7 @@ import {
 import { requireSession } from "../../../src/lib/auth";
 import { AttendancePanel } from "./attendance-panel";
 import { BackupDmPanel } from "./backup-dm-panel";
+import { DiscordStatus, DiscordSyncPanel } from "./discord-sync-panel";
 import { EditEventForm } from "./edit-event-form";
 import { EligibilityRulesPanel } from "./eligibility-rules-panel";
 import { EventManagement } from "./event-management";
@@ -41,7 +42,7 @@ export default async function EventPage({
   const { id } = await params;
   const session = await requireSession();
   const guildId = session.activeGuildId;
-  const [event, settings, messageJobs, backupDmCandidates, preferences] = await Promise.all([
+  const [event, settings, messageJobs, backupDmCandidates, preferences, discordStatus] = await Promise.all([
     artemisApi<EventDetail>(`/api/v1/events/${id}`, { guildId }),
     artemisApi<GuildSettings>(
       `/api/v1/guild-settings?guildId=${guildId}`,
@@ -65,6 +66,7 @@ export default async function EventPage({
     >(`/api/v1/events/${id}/backup-dm/candidates`, { guildId }).catch(() => []),
     // Staff/admin-only: player-with-player and player-with-DM preferences (rules.md §7.5).
     artemisApi<SignupPreference[]>(`/api/v1/events/${id}/preferences`, { guildId }).catch(() => []),
+    artemisApi<DiscordStatus>(`/api/v1/events/${id}/discord/status`, { guildId }).catch(() => null),
   ]);
   const eventTimeZone =
     settings?.defaultTimezone ??
@@ -182,6 +184,12 @@ export default async function EventPage({
         status={event.status}
         assignmentLockedAt={event.assignmentLockedAt}
         roles={event.roles}
+      />
+
+      <DiscordSyncPanel
+        eventId={event.id}
+        status={discordStatus}
+        failedJobs={(messageJobs ?? []).filter((job) => job.status === "FAILED")}
       />
 
       <BackupDmPanel eventId={event.id} candidates={backupDmCandidates ?? []} />

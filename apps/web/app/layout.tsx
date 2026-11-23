@@ -21,6 +21,7 @@ export default async function RootLayout({
     { href: "/calendar", label: "Calendar" },
     { href: "/series", label: "Series" },
     { href: "/ambassadors", label: "Ambassadors" },
+    { href: "/discord-sync", label: "Discord Sync" },
     { href: "/settings", label: "Settings" },
   ];
 

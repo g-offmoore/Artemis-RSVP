@@ -365,6 +365,9 @@ export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateSchema>;
 
 export const seriesGenerateSchema = z.object({
   count: z.coerce.number().int().min(1).max(12).default(4),
+  // Optional client-generated idempotency key. Retrying a request with the same
+  // requestId returns the original batch instead of generating a new one.
+  requestId: z.string().trim().min(8).max(100).optional(),
 });
 export type SeriesGenerateInput = z.infer<typeof seriesGenerateSchema>;
 
@@ -1034,9 +1037,23 @@ export function computeBackupDmAskScheduledFor(startAt: Date): Date {
   return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.backupDmAskOffsetMs);
 }
 
-// T-1h: final assignment lock — this is a P0 requirement (rules.md §11.1).
-export function computeAssignmentLockScheduledFor(startAt: Date): Date {
-  return new Date(startAt.getTime() - MESSAGE_JOB_DEFAULTS.assignmentLockOffsetMs);
+// Canonical assignment-lock policy (F01). The default is T-1h (rules.md §11.1).
+// An event may carry an explicit per-event override in minutes; null/undefined
+// means "use the default". Scheduler, preflight copy, web, and Discord must all
+// derive the lock time through these helpers so they never disagree.
+export const DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES =
+  MESSAGE_JOB_DEFAULTS.assignmentLockOffsetMs / 60_000;
+
+export function effectiveAssignmentLockOffsetMinutes(overrideMinutes?: number | null): number {
+  if (overrideMinutes == null) return DEFAULT_ASSIGNMENT_LOCK_OFFSET_MINUTES;
+  if (!Number.isInteger(overrideMinutes) || overrideMinutes < 0) {
+    throw new Error(`Invalid assignment lock offset: ${overrideMinutes}`);
+  }
+  return overrideMinutes;
+}
+
+export function computeAssignmentLockScheduledFor(startAt: Date, overrideMinutes?: number | null): Date {
+  return new Date(startAt.getTime() - effectiveAssignmentLockOffsetMinutes(overrideMinutes) * 60_000);
 }
 
 // ─── Backup DM Discord button helpers ────────────────────────────────────
@@ -1071,4 +1088,158 @@ export function parseBackupDmCustomId(
   const participantId = parts.slice(3).join(":");
   if (!eventId || !participantId) return null;
   return { action, eventId, participantId };
+}
+
+// ─── Durable delivery policy (F02) ───────────────────────────────────────
+// Message jobs are processed at-least-once with logical dedupe via
+// `deliveryKey`. These pure helpers decide what happens after an attempt.
+
+export const DELIVERY_DEFAULTS = {
+  maxAttempts: 5,
+  leaseMs: 5 * 60 * 1000,
+  baseBackoffMs: 60 * 1000,
+  maxBackoffMs: 60 * 60 * 1000,
+} as const;
+
+// Legacy-compatible logical identity: one row per event/type/target.
+export function legacyDeliveryKey(eventId: string, messageType: string, targetId: string): string {
+  return `${eventId}:${messageType}:${targetId}`;
+}
+
+// One assignment notice per recipient per committed lock revision. Seated and
+// waitlisted notices share a key so one person never receives both for the
+// same revision.
+export function assignmentDeliveryKey(eventId: string, lockedAt: Date, discordUserId: string): string {
+  return `${eventId}:ASSIGNMENT:${lockedAt.getTime()}:${discordUserId}`;
+}
+
+export type DeliveryErrorKind = "RETRYABLE" | "RATE_LIMITED" | "TERMINAL";
+
+export type ClassifiedDeliveryError = {
+  kind: DeliveryErrorKind;
+  retryAfterMs?: number;
+  message: string;
+};
+
+// Classify an error thrown while dispatching a job. Discord error text from
+// the worker looks like "Discord API 403 (/path): {json}".
+export function classifyDeliveryError(err: unknown): ClassifiedDeliveryError {
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = sanitizeDeliveryError(raw);
+  // Dispatchers mark non-recoverable problems (unknown job type, missing
+  // configuration) by naming the error TerminalDeliveryError.
+  if (err instanceof Error && err.name === "TerminalDeliveryError") {
+    return { kind: "TERMINAL", message };
+  }
+  const status = Number(/Discord API (\d{3})/.exec(raw)?.[1] ?? NaN);
+  const code = Number(/"code"\s*:\s*(\d+)/.exec(raw)?.[1] ?? NaN);
+
+  if (status === 429) {
+    const retryAfterSec = Number(/"retry_after"\s*:\s*([\d.]+)/.exec(raw)?.[1] ?? NaN);
+    return {
+      kind: "RATE_LIMITED",
+      retryAfterMs: Number.isFinite(retryAfterSec) ? Math.ceil(retryAfterSec * 1000) : undefined,
+      message,
+    };
+  }
+  // 50007: cannot send messages to this user (DMs closed/blocked).
+  // 10003/10013: unknown channel/user. 403/404 will not fix themselves on retry.
+  if (code === 50007 || code === 10003 || code === 10013 || status === 403 || status === 404) {
+    return { kind: "TERMINAL", message };
+  }
+  if (Number.isFinite(status) && status >= 400 && status < 500) {
+    return { kind: "TERMINAL", message };
+  }
+  return { kind: "RETRYABLE", message };
+}
+
+export class TerminalDeliveryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TerminalDeliveryError";
+  }
+}
+
+// Strip bot tokens and long payloads before persisting an error.
+export function sanitizeDeliveryError(message: string): string {
+  return message
+    .replace(/Bot\s+[A-Za-z0-9._-]{20,}/g, "Bot [redacted]")
+    .replace(/[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}/g, "[redacted-token]")
+    .slice(0, 2000);
+}
+
+// Exponential backoff with full jitter, bounded by maxBackoffMs.
+export function computeDeliveryBackoffMs(attempt: number, random: () => number = Math.random): number {
+  const exp = DELIVERY_DEFAULTS.baseBackoffMs * 2 ** Math.max(0, attempt - 1);
+  const capped = Math.min(exp, DELIVERY_DEFAULTS.maxBackoffMs);
+  return Math.max(DELIVERY_DEFAULTS.baseBackoffMs / 2, Math.floor(capped * (0.5 + random() / 2)));
+}
+
+export type DeliveryOutcome =
+  | { status: "PENDING"; nextAttemptAt: Date; lastError: string }
+  | { status: "FAILED"; lastError: string };
+
+// Decide the next state after a failed attempt. `attempts` already includes
+// the attempt that just failed.
+export function nextDeliveryState(
+  attempts: number,
+  maxAttempts: number,
+  err: unknown,
+  now: Date = new Date(),
+  random: () => number = Math.random,
+): DeliveryOutcome {
+  const classified = classifyDeliveryError(err);
+  if (classified.kind === "TERMINAL" || attempts >= maxAttempts) {
+    return { status: "FAILED", lastError: classified.message };
+  }
+  const delay =
+    classified.kind === "RATE_LIMITED" && classified.retryAfterMs != null
+      ? classified.retryAfterMs
+      : computeDeliveryBackoffMs(attempts, random);
+  return {
+    status: "PENDING",
+    nextAttemptAt: new Date(now.getTime() + delay),
+    lastError: classified.message,
+  };
+}
+
+// ─── Series occurrence identity (F03) ────────────────────────────────────
+// Each generated occurrence carries a stable slot key: the local calendar date
+// ("YYYY-MM-DD") of its original slot in the series timezone. The key never
+// changes when the occurrence is moved or cancelled, so a cancelled slot is a
+// tombstone that is never regenerated, and (seriesId, occurrenceKey) is unique.
+
+export function occurrenceKeyFor(date: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+export function parseOccurrenceKey(key: string): { year: number; month: number; day: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!m) throw new Error(`Invalid occurrence key: ${key}`);
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}
+
+// Generation cursor positioned on the slot's local date (noon, so DST shifts
+// never move it to a neighboring day). nextWeekdayDateInTimezone is exclusive,
+// so the next candidate is strictly after this slot.
+export function cursorAfterOccurrenceKey(key: string, tz: string): Date {
+  const { year, month, day } = parseOccurrenceKey(key);
+  return makeDateInTimezone(year, month, day, 12, 0, tz);
+}
+
+// True when a Discord REST error means the target object no longer exists
+// (HTTP 404, or Unknown Role/Member/Channel/Message codes). Used so cleanup
+// treats "already gone" as success while permission errors stay failures.
+export function isDiscordNotFound(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/Discord API 404\b/.test(raw)) return true;
+  const code = Number(/"code"\s*:\s*(\d+)/.exec(raw)?.[1] ?? NaN);
+  return [10003, 10007, 10008, 10011, 10013].includes(code);
 }
